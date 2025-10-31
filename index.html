@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Device Discovery – STA MVP</title>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --card: #121936;
+      --muted: #8993b1;
+      --text: #e8edff;
+      --accent: #7aa2ff;
+      --ok: #3ddc97;
+      --warn: #ffd166;
+      --err: #ff6b6b;
+    }
+    html, body { height: 100%; }
+    body {
+      margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      background: linear-gradient(180deg, #0b1020 0%, #0c1430 100%);
+      color: var(--text);
+    }
+    .wrap { max-width: 920px; margin: 0 auto; padding: 24px; }
+    header { display:flex; align-items: center; justify-content: space-between; gap: 16px; }
+    .idline { display:flex; align-items:center; gap: 10px; flex-wrap: wrap; }
+    .badge { padding: 6px 10px; border-radius: 999px; font-weight: 600; font-size: 12px; letter-spacing: .02em; }
+    .status { background: #20304f; color: var(--text); border: 1px solid #2a3a61; }
+    .ok { background: rgba(61,220,151,.15); border-color: rgba(61,220,151,.5); color: var(--ok); }
+    .warn { background: rgba(255,209,102,.15); border-color: rgba(255,209,102,.5); color: var(--warn); }
+    .err { background: rgba(255,107,107,.15); border-color: rgba(255,107,107,.5); color: var(--err); }
+    .card { background: var(--card); border: 1px solid #223159; border-radius: 18px; padding: 18px; box-shadow: 0 10px 40px rgba(0,0,0,.25); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+    h1 { font-size: clamp(20px, 4vw, 28px); margin: 12px 0; }
+    h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); margin: 0 0 10px; }
+    .hero { display:grid; grid-template-columns: 160px 1fr; gap: 16px; align-items:center; }
+    .hero img { width: 160px; height: 120px; object-fit: cover; border-radius: 12px; border: 1px solid #2a3a61; background: #0b1020; }
+    .menu { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-top: 12px; }
+    .btn { display:flex; align-items:center; justify-content:center; gap: 8px;
+      padding: 12px 14px; border-radius: 14px; background:#1a2446; border:1px solid #2a3a61; color:var(--text); text-decoration:none; font-weight:600; }
+    .btn:hover { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(122,162,255,.15) inset; }
+    section { margin-top: 18px; }
+    ol, ul { margin: 8px 0 0 18px; }
+    .small { color: var(--muted); font-size: 12px; }
+    .selector { display:flex; flex-wrap:wrap; gap: 12px; margin-top: 14px; }
+    .chip { text-decoration: none; color: var(--text); border:1px solid #2a3a61; padding: 10px 12px; border-radius: 999px; }
+    .chip:hover { border-color: var(--accent); }
+    .copylink { cursor: pointer; text-decoration: underline; color: var(--accent); }
+    .toast { position: fixed; right: 16px; bottom: 16px; background:#172349; border: 1px solid #2a3a61; padding: 12px 14px; border-radius: 12px; opacity:0; transform: translateY(8px); transition: .3s ease; }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .footer { margin-top: 26px; color: var(--muted); font-size: 12px; }
+    .mutebar { display:flex; align-items:center; gap: 8px; }
+    .danger { color: var(--err); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="idline">
+        <span class="badge status" id="deviceId">Device: —</span>
+        <span class="badge ok" id="statusPill">Status: OK</span>
+      </div>
+      <a id="copyLink" class="small copylink" title="Copy deep link">Copy link</a>
+    </header>
+
+    <div class="card" style="margin-top:12px;">
+      <div class="hero">
+        <img id="deviceImg" alt="Device image" />
+        <div>
+          <h1 id="deviceName">Unknown Device</h1>
+          <div class="small" id="deviceDesc">Open this page via QR/NFC/BLE from a tagged device.</div>
+          <div class="menu" style="margin-top:12px">
+            <a href="#quickstart" class="btn">Quick Start</a>
+            <a href="#alarms" class="btn">Common Alarms</a>
+            <a href="#troubleshoot" class="btn">Troubleshooting</a>
+            <a id="manualBtn" class="btn" target="_blank" rel="noopener">Manual (PDF)</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <section class="card" id="quickstart">
+      <h2>Quick Start</h2>
+      <ol id="qsList"></ol>
+    </section>
+
+    <section class="card" id="alarms">
+      <h2>Common Alarms</h2>
+      <ul id="alarmList"></ul>
+    </section>
+
+    <section class="card" id="troubleshoot">
+      <h2>Troubleshooting</h2>
+      <ul id="tsList"></ul>
+    </section>
+
+    <section class="card">
+      <h2>Contacts</h2>
+      <div id="contactBlock" class="small"></div>
+    </section>
+
+    <section class="card" id="chooser" style="display:none">
+      <h2>Select a device</h2>
+      <div class="selector" id="selector"></div>
+    </section>
+
+    <div class="footer">
+      Zero‑install browser demo for STA 2026. No PHI. Content is educational, not for clinical use.
+    </div>
+
+    <div class="toast" id="toast">Link copied</div>
+  </div>
+
+  <script>
+    // --- In-page demo content ---
+    const DEVICES = {
+      "CASMED-FORESIGHT-ELITE": {
+        name: "CASMED FORE-SIGHT Elite Cerebral Oximeter",
+        img: "Casmed/Casmed_photo.jpg",
+        desc: "Near-infrared spectroscopy monitor for continuous cerebral/somatic regional oxygen saturation (rSO₂) monitoring.",
+        manualUrl: "Casmed/foresight_elite.pdf",
+        contact: { biomed: "+1 (555) 010-2000", clinical: "+1 (555) 010-4000" },
+        quickstart: [
+          "Connect the FORE-SIGHT Elite sensor cable to the patient interface module (PIM).",
+          "Peel and apply left and right forehead sensors according to the sensor placement diagram; press to ensure full contact.",
+          "Power on the monitor; confirm startup completes without error and patient ID (if used) is entered.",
+          "Verify baseline rSO₂ values display for L and R channels; allow 30–60 seconds for stabilization.",
+          "Set alarm limits appropriate to patient/procedure (e.g. 20% drop from baseline or absolute 50–60%)."
+        ],
+        alarms: [
+          "Sensor Off / Poor Signal → Re-seat sensor, clean/trim site, check cable integrity.",
+          "Low rSO₂ (Left/Right) → Confirm sensor placement, check perfusion (MAP, SpO₂), assess head/neck position, notify provider.",
+          "Module/Channel Error → Power-cycle PIM, try alternate port/sensor; if persistent, call biomed.",
+          "Battery Low → Connect to AC power and verify charging icon."
+        ],
+        troubleshooting: [
+          "No values: confirm correct sensor type for FORE-SIGHT Elite and that PIM is recognized.",
+          "Values flatlined at 15%: likely calibration/sensor issue — replace sensor and recheck.",
+          "Readings inconsistent with clinical picture: check for ambient light, motion, or extracranial contamination.",
+          "Cannot open manual: use workstation with PDF access to /mnt/data/foresight_elite.pdf or local share."
+        ]
+      }
+    };
+
+    // --- Helpers ---
+    const $ = sel => document.querySelector(sel);
+    const qs = k => new URLSearchParams(location.search).get(k);
+
+    function renderDevice(id){
+      const d = DEVICES[id];
+      const unknown = !d;
+      $('#deviceId').textContent = `Device: ${id || '—'}`;
+      $('#deviceName').textContent = d?.name || 'Unknown Device';
+      $('#deviceDesc').textContent = d?.desc || 'Select a device below or open via QR/NFC/BLE.';
+      $('#deviceImg').src = d?.img || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600"><rect width="100%" height="100%" fill="%230b1020"/><text x="50%25" y="50%25" fill="%238993b1" text-anchor="middle" font-family="Arial" font-size="24">No Image</text></svg>';
+      $('#manualBtn').href = d?.manualUrl || '#';
+      $('#manualBtn').classList.toggle('btn', true);
+
+      // lists
+      const fill = (ul, items) => { ul.innerHTML = (items||[]).map(x => `<li>${escapeHtml(x)}</li>`).join(''); };
+      fill($('#qsList'), d?.quickstart);
+      fill($('#alarmList'), d?.alarms);
+      fill($('#tsList'), d?.troubleshooting);
+
+      // contacts
+      const c = d?.contact || {};
+      $('#contactBlock').innerHTML = [
+        c.biomed ? `Biomed: <a href="tel:${encodeURIComponent(c.biomed)}">${escapeHtml(c.biomed)}</a>` : '',
+        c.it ? `IT: <a href="tel:${encodeURIComponent(c.it)}">${escapeHtml(c.it)}</a>` : ''
+      ].filter(Boolean).join(' · ');
+
+      // chooser visibility
+      $('#chooser').style.display = unknown ? 'block' : 'none';
+    }
+
+    function buildSelector(){
+      const el = $('#selector');
+      el.innerHTML = '';
+      Object.keys(DEVICES).forEach(id => {
+        const a = document.createElement('a');
+        a.className = 'chip';
+        a.href = `?d=${encodeURIComponent(id)}`;
+        a.textContent = `${DEVICES[id].name} (${id})`;
+        el.appendChild(a);
+      })
+    }
+
+    function escapeHtml(s){
+      return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
+    }
+
+    // Copy link
+    $('#copyLink').addEventListener('click', () => {
+      const url = location.origin + location.pathname + '?d=' + encodeURIComponent(qs('d')||'');
+      navigator.clipboard.writeText(url).then(()=> toast('Link copied')); 
+    });
+    function toast(msg){
+      const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+      setTimeout(()=> t.classList.remove('show'), 1600);
+    }
+
+    // Init
+    buildSelector();
+    renderDevice(qs('d'));
+  </script>
+</body>
+</html>
