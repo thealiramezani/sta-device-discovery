@@ -6,20 +6,13 @@
   <title>Device Discovery – STA MVP</title>
   <style>
     :root {
-      --bg: #0b1020;
-      --card: #121936;
-      --muted: #8993b1;
-      --text: #e8edff;
-      --accent: #7aa2ff;
-      --ok: #3ddc97;
-      --warn: #ffd166;
-      --err: #ff6b6b;
+      --bg: #0b1020; --card: #121936; --muted: #8993b1; --text: #e8edff; --accent: #7aa2ff;
+      --ok: #3ddc97; --warn: #ffd166; --err: #ff6b6b;
     }
     html, body { height: 100%; }
     body {
       margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
-      background: linear-gradient(180deg, #0b1020 0%, #0c1430 100%);
-      color: var(--text);
+      background: linear-gradient(180deg, #0b1020 0%, #0c1430 100%); color: var(--text);
     }
     .wrap { max-width: 920px; margin: 0 auto; padding: 24px; }
     header { display:flex; align-items: center; justify-content: space-between; gap: 16px; }
@@ -36,8 +29,7 @@
     .hero { display:grid; grid-template-columns: 160px 1fr; gap: 16px; align-items:center; }
     .hero img { width: 160px; height: 120px; object-fit: cover; border-radius: 12px; border: 1px solid #2a3a61; background: #0b1020; }
     .menu { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-top: 12px; }
-    .btn { display:flex; align-items:center; justify-content:center; gap: 8px;
-      padding: 12px 14px; border-radius: 14px; background:#1a2446; border:1px solid #2a3a61; color:var(--text); text-decoration:none; font-weight:600; }
+    .btn { display:flex; align-items:center; justify-content:center; gap: 8px; padding: 12px 14px; border-radius: 14px; background:#1a2446; border:1px solid #2a3a61; color:var(--text); text-decoration:none; font-weight:600; cursor:pointer; }
     .btn:hover { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(122,162,255,.15) inset; }
     section { margin-top: 18px; }
     ol, ul { margin: 8px 0 0 18px; }
@@ -51,7 +43,17 @@
     .footer { margin-top: 26px; color: var(--muted); font-size: 12px; }
     .mutebar { display:flex; align-items:center; gap: 8px; }
     .danger { color: var(--err); }
+    /* detector UI */
+    .bar { height: 10px; background:#1a2446; border:1px solid #2a3a61; border-radius:999px; overflow:hidden; }
+    .bar > span { display:block; height:100%; width:0%; background: linear-gradient(90deg, #7aa2ff, #3ddc97); transition: width .35s ease; }
+    .thumbs { display:flex; gap:10px; flex-wrap:wrap; margin-top:10px; }
+    .thumbs img { width: 84px; height: 64px; object-fit: cover; border-radius: 10px; border:1px solid #2a3a61; }
+    .det-row { display:flex; gap: 12px; flex-wrap:wrap; align-items:center; }
+    .hidden { display:none !important; }
   </style>
+  <!-- TensorFlow.js + Mobilenet (for lightweight embeddings) -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.0"></script>
 </head>
 <body>
   <div class="wrap">
@@ -79,6 +81,35 @@
       </div>
     </div>
 
+    <!-- NEW: Detect by photo -->
+    <section class="card" id="detect">
+      <h2>Detect by Photo</h2>
+      <div class="det-row">
+        <button class="btn" id="snapBtn">Take a Photo</button>
+        <input type="file" id="fileInput" accept="image/*" capture="environment" class="hidden" />
+        <button class="btn" id="uploadBtn">Upload Image</button>
+        <span class="small" id="detStatus">Model loading…</span>
+      </div>
+      <div class="grid" style="margin-top:12px">
+        <div>
+          <div class="small">Your Photo</div>
+          <img id="userImg" alt="Your photo" style="width:100%;max-width:360px;height:auto;border-radius:12px;border:1px solid #2a3a61;background:#0b1020;"/>
+        </div>
+        <div>
+          <div class="small">Confidence</div>
+          <div class="bar" style="margin:8px 0 6px;"><span id="confBar"></span></div>
+          <div class="small" id="confText">—</div>
+          <div class="small" style="margin-top:10px">Top Matches</div>
+          <div id="cands"></div>
+          <div class="thumbs" id="candThumbs"></div>
+          <div class="det-row" style="margin-top:12px">
+            <button class="btn" id="confirmBtn" disabled>Use Best Match</button>
+            <a href="#chooser" class="btn">Choose Manually</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section class="card" id="quickstart">
       <h2>Quick Start</h2>
       <ol id="qsList"></ol>
@@ -105,7 +136,7 @@
     </section>
 
     <div class="footer">
-      Zero‑install browser demo for STA 2026. No PHI. Content is educational, not for clinical use.
+      Zero-install browser demo for STA 2026. No PHI. Content is educational, not for clinical use.
     </div>
 
     <div class="toast" id="toast">Link copied</div>
@@ -116,6 +147,8 @@
     const DEVICES = {
       "CASMED-FORESIGHT-ELITE": {
         name: "CASMED FORE-SIGHT Elite Cerebral Oximeter",
+        // You can provide multiple reference images to improve recognition:
+        // images: ["Devices/Casmed/Casmed_photo.jpg", "Devices/Casmed/Casmed_alt1.jpg"]
         img: "Devices/Casmed/Casmed_photo.jpg",
         desc: "Near-infrared spectroscopy monitor for continuous cerebral/somatic regional oxygen saturation (rSO₂) monitoring.",
         manualUrl: "Devices/Casmed/foresight_elite.pdf",
@@ -145,6 +178,7 @@
     // --- Helpers ---
     const $ = sel => document.querySelector(sel);
     const qs = k => new URLSearchParams(location.search).get(k);
+    function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c])); }
 
     function renderDevice(id){
       const d = DEVICES[id];
@@ -156,20 +190,17 @@
       $('#manualBtn').href = d?.manualUrl || '#';
       $('#manualBtn').classList.toggle('btn', true);
 
-      // lists
       const fill = (ul, items) => { ul.innerHTML = (items||[]).map(x => `<li>${escapeHtml(x)}</li>`).join(''); };
       fill($('#qsList'), d?.quickstart);
       fill($('#alarmList'), d?.alarms);
       fill($('#tsList'), d?.troubleshooting);
 
-      // contacts
       const c = d?.contact || {};
       $('#contactBlock').innerHTML = [
         c.biomed ? `Biomed: <a href="tel:${encodeURIComponent(c.biomed)}">${escapeHtml(c.biomed)}</a>` : '',
         c.it ? `IT: <a href="tel:${encodeURIComponent(c.it)}">${escapeHtml(c.it)}</a>` : ''
       ].filter(Boolean).join(' · ');
 
-      // chooser visibility
       $('#chooser').style.display = unknown ? 'block' : 'none';
     }
 
@@ -185,23 +216,187 @@
       })
     }
 
-    function escapeHtml(s){
-      return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
-    }
-
     // Copy link
     $('#copyLink').addEventListener('click', () => {
       const url = location.origin + location.pathname + '?d=' + encodeURIComponent(qs('d')||'');
-      navigator.clipboard.writeText(url).then(()=> toast('Link copied')); 
+      navigator.clipboard.writeText(url).then(()=> toast('Link copied'));
     });
     function toast(msg){
       const t = $('#toast'); t.textContent = msg; t.classList.add('show');
       setTimeout(()=> t.classList.remove('show'), 1600);
     }
 
+    // ------------------------------
+    // Detection (Mobilenet embeddings)
+    // ------------------------------
+    const ACCEPT = 0.35;     // accept threshold (cosine-ish on normalized features)
+    const MAYBE  = 0.25;     // show top candidates
+
+    let mobilenetModel = null;
+    let refIndex = [];       // {device_id, imgUrl, vec: Float32Array}
+    let bestCandidate = null;
+
+    const detStatus = $('#detStatus');
+    const confBar = $('#confBar');
+    const confText = $('#confText');
+    const cands = $('#cands');
+    const candThumbs = $('#candThumbs');
+    const confirmBtn = $('#confirmBtn');
+    const userImg = $('#userImg');
+
+    // Load model and build reference vectors
+    async function initDetector(){
+      detStatus.textContent = 'Loading model…';
+      mobilenetModel = await mobilenet.load({ version: 2, alpha: 1.0 });
+      detStatus.textContent = 'Indexing reference images…';
+      await buildReferenceIndex();
+      detStatus.textContent = 'Ready. Take or upload a photo.';
+    }
+
+    function getRefImagesForDevice(d){
+      // Support either d.images (array) or single d.img
+      if (Array.isArray(d.images) && d.images.length) return d.images;
+      return d.img ? [d.img] : [];
+    }
+
+    async function buildReferenceIndex(){
+      refIndex = [];
+      const entries = Object.entries(DEVICES);
+      for (const [device_id, d] of entries){
+        const imgs = getRefImagesForDevice(d);
+        for (const imgUrl of imgs){
+          const el = await loadImage(imgUrl);
+          const vec = await getEmbedding(el);
+          refIndex.push({ device_id, imgUrl, vec });
+        }
+      }
+    }
+
+    function loadImage(src){
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => resolve(img);
+        img.onerror = (e) => reject(e);
+        img.src = src;
+      });
+    }
+
+    async function getEmbedding(imgEl){
+      // Infer an internal activation and flatten/normalize
+      const activation = mobilenetModel.infer(imgEl, { embedding: true }); // dense 1024
+      const vec = await activation.data(); // Float32Array
+      activation.dispose();
+      // L2 normalize
+      const v = new Float32Array(vec.length);
+      let norm = 0;
+      for (let i=0;i<vec.length;i++){ norm += vec[i]*vec[i]; }
+      norm = Math.sqrt(norm) || 1e-6;
+      for (let i=0;i<vec.length;i++){ v[i] = vec[i] / norm; }
+      return v;
+    }
+
+    function cosine(a, b){
+      // a,b normalized → dot product in [-1,1]
+      let s = 0;
+      for (let i=0;i<a.length;i++) s += a[i]*b[i];
+      return s;
+    }
+
+    function aggregateScores(scores){
+      // scores: [{device_id, score, imgUrl}]
+      const byDev = new Map();
+      for (const r of scores){
+        const cur = byDev.get(r.device_id);
+        if (!cur || r.score > cur.score) byDev.set(r.device_id, r);
+      }
+      return Array.from(byDev.values()).sort((a,b)=> b.score - a.score);
+    }
+
+    function updateUIWithResult(best, ranked){
+      bestCandidate = best;
+      const pct = Math.max(0, Math.min(1, (best.score + 1) / 2)); // map [-1,1] to [0,1] for bar
+      confBar.style.width = (pct*100).toFixed(0) + '%';
+      confText.textContent = `Best: ${DEVICES[best.device_id]?.name || best.device_id} — score ${best.score.toFixed(3)}`;
+
+      // candidates list
+      cands.innerHTML = ranked.slice(0,5).map((r,i)=>{
+        const name = DEVICES[r.device_id]?.name || r.device_id;
+        const badge = i===0 ? `<span class="badge ok">Best</span>` : '';
+        return `<div class="small" style="margin:4px 0">${badge} ${escapeHtml(name)} <span style="opacity:.7">(${r.score.toFixed(3)})</span></div>`;
+      }).join('');
+
+      // thumbs
+      candThumbs.innerHTML = ranked.slice(0,5).map(r=>{
+        const img = refIndex.find(x=>x.device_id===r.device_id)?.imgUrl;
+        return img ? `<img src="${img}" alt="${escapeHtml(r.device_id)}">` : '';
+      }).join('');
+
+      // enable/disable confirm
+      confirmBtn.disabled = best.score < MAYBE;
+      if (best.score >= ACCEPT){
+        detStatus.textContent = 'High confidence match found.';
+      } else if (best.score >= MAYBE){
+        detStatus.textContent = 'Possible matches found. Review and confirm.';
+      } else {
+        detStatus.textContent = 'Low confidence. Try another angle or choose manually.';
+      }
+    }
+
+    async function detectFromImageElement(imgEl){
+      const q = await getEmbedding(imgEl);
+      const scores = refIndex.map(ref => ({ device_id: ref.device_id, imgUrl: ref.imgUrl, score: cosine(q, ref.vec) }));
+      const ranked = aggregateScores(scores);
+      updateUIWithResult(ranked[0], ranked);
+    }
+
+    function showUserImageFromFile(file){
+      return new Promise((resolve, reject)=>{
+        const r = new FileReader();
+        r.onload = () => { userImg.src = r.result; resolve(); };
+        r.onerror = reject;
+        r.readAsDataURL(file);
+      });
+    }
+
+    // UI hooks
+    $('#snapBtn').addEventListener('click', () => $('#fileInput').click());
+    $('#uploadBtn').addEventListener('click', () => $('#fileInput').click());
+
+    $('#fileInput').addEventListener('change', async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      detStatus.textContent = 'Analyzing photo…';
+      await showUserImageFromFile(file);
+      // Wait for image to mount
+      await new Promise(r => setTimeout(r, 20));
+      try {
+        await detectFromImageElement(userImg);
+      } catch (err){
+        console.error(err);
+        detStatus.textContent = 'Could not analyze the photo.';
+      }
+    });
+
+    confirmBtn.addEventListener('click', () => {
+      if (!bestCandidate) return;
+      const id = bestCandidate.device_id;
+      // Set query param and render
+      const url = location.origin + location.pathname + '?d=' + encodeURIComponent(id);
+      history.replaceState(null, '', url);
+      renderDevice(id);
+      toast(`Using ${DEVICES[id]?.name || id}`);
+    });
+
     // Init
     buildSelector();
     renderDevice(qs('d'));
+
+    // Kick off model loading (don’t block first render)
+    initDetector().catch(err => {
+      console.error(err);
+      detStatus.textContent = 'Model failed to load.';
+    });
   </script>
 </body>
 </html>

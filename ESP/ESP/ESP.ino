@@ -1,45 +1,76 @@
 #include <BLEDevice.h>
 #include <BLEUtils.h>
-#include <BLEBeacon.h>
 #include <BLEAdvertising.h>
-#include <BLEServer.h>
 
-// CHANGE THIS to your actual GitHub Pages URL:
-const char* URL_TO_BROADCAST = "https://thealiramezani.github.io/sta-device-discovery/?d=CASMED-FORESIGHT-ELITE";
+// Keep this URL very short (<= ~22 chars after "https://")
+const char* URL_TO_BROADCAST = "https://is.gd/UXNWgS";
 
 BLEAdvertising* pAdvertising;
+BLEServer* pServer;
+
+// Immediately drop any incoming connection and keep advertising.
+class Rejector : public BLEServerCallbacks {
+  void onConnect(BLEServer* s) override {
+    // Brief tick for stack stability, then disconnect central
+    delay(10);
+    s->disconnect(0);  // drop the only connection handle
+  }
+  void onDisconnect(BLEServer* s) override {
+    // Resume advertising the moment a central goes away
+    if (pAdvertising) pAdvertising->start();
+  }
+};
+
+void startAdvertising() {
+  BLEAdvertisementData advData;
+  BLEAdvertisementData scanResp;   // we’ll use this for the name
+  BLEUUID eddystoneUUID((uint16_t)0xFEAA);
+
+  advData.setFlags(ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT);
+
+  // --- Eddystone-URL frame ---
+  String frame;
+  frame += (char)0x10;   // URL frame type
+  frame += (char)0xEE;   // Tx power placeholder
+  frame += (char)0x03;   // "https://"
+
+  const char* prefix = "https://";
+  for (size_t i = strlen(prefix); i < strlen(URL_TO_BROADCAST); i++) {
+    frame += URL_TO_BROADCAST[i];
+  }
+
+  advData.setServiceData(eddystoneUUID, frame);
+
+  // 👉 Add the friendly name ONLY to the scan-response packet
+  scanResp.setName("STA Device Tag");
+
+  pAdvertising->setAdvertisementData(advData);
+  pAdvertising->setScanResponseData(scanResp);
+
+  pAdvertising->start();
+}
+
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("Starting Eddystone URL beacon...");
+  BLEDevice::init("");                 // no GAP name
+  BLEDevice::setPower(ESP_PWR_LVL_P3); // optional: modest TX power to reduce range
 
-  BLEDevice::init("STA Device Tag");
+  pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new Rejector());
+
   pAdvertising = BLEDevice::getAdvertising();
+  startAdvertising();
 
-  BLEAdvertisementData advData;
-  // Build Eddystone-URL frame
-  std::string urlServiceData = "";
-  urlServiceData += (char)0x10; // Eddystone-URL frame type
-  urlServiceData += (char)0xEE; // calibrated Tx power (dummy)
-
-  // Eddystone URL scheme prefix: 0x03 = "https://"
-  urlServiceData += (char)0x03;
-
-  // Encode the rest of the URL
-  const char* url = URL_TO_BROADCAST;
-  for (size_t i = 8; i < strlen(url); i++) { // skip "https://"
-    urlServiceData += url[i];
-  }
-
-  advData.setFlags(0x04); // BR_EDR_NOT_SUPPORTED
-  advData.addData(std::string("\x16\xAA\xFE", 3) + urlServiceData); // 0xFEAA = Eddystone UUID
-
-  pAdvertising->setAdvertisementData(advData);
-  pAdvertising->start();
-
-  Serial.println("Beacon started.");
+  Serial.println("Eddystone-URL beacon (auto-reject) started");
 }
 
 void loop() {
-  // nothing
+  // Safety: if advertising ever stops, restart it.
+  static uint32_t lastCheck = 0;
+  if (millis() - lastCheck > 3000) {
+    lastCheck = millis();
+    // getAdvertising()->isAdvertising() exists on some versions; if not, just restart periodically:
+    pAdvertising->start(); // harmless if already advertising
+  }
 }
