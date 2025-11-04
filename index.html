@@ -81,7 +81,7 @@
       </div>
     </div>
 
-    <!-- NEW: Detect by photo -->
+    <!-- Detect by photo -->
     <section class="card" id="detect">
       <h2>Detect by Photo</h2>
       <div class="det-row">
@@ -171,6 +171,53 @@
           "Values flatlined at 15%: likely calibration/sensor issue — replace sensor and recheck.",
           "Readings inconsistent with clinical picture: check for ambient light, motion, or extracranial contamination.",
           "Cannot open manual: use workstation with PDF access to /mnt/data/foresight_elite.pdf or local share."
+        ]
+      },
+
+      "NICO2": {
+        name: "NICO₂ Cardiac Output Monitor",
+        img: "Devices/Nico2/Nico2_photo.png",
+        desc: "Non-invasive cardiac output monitor measuring CO₂ elimination and airway flow to estimate cardiac output.",
+        manualUrl: "Devices/Nico2/Service%20Manual%20Nico2.pdf",
+        contact: { biomed: "+1 (555) 010-2100", clinical: "+1 (555) 010-4100" },
+        quickstart: [
+          "Connect the airway module and flow sensor to the NICO₂ main unit.",
+          "Power on; verify self-test passes and calibrate gas sensor if prompted.",
+          "Attach flow sensor and CO₂ sampling line to the patient circuit.",
+          "Start measurement and confirm cardiac output and CO₂ readings."
+        ],
+        alarms: [
+          "Flow Sensor Error → Check connections and tubing for leaks.",
+          "CO₂ Sensor Calibration → Perform calibration or replace sensor.",
+          "Low Battery → Connect power adapter and recharge."
+        ],
+        troubleshooting: [
+          "No reading displayed → Ensure proper patient connection and flow sensor.",
+          "Inconsistent cardiac output → Check airway leaks and ventilation settings.",
+          "Cannot open manual → Verify local path or open via workstation with PDF access."
+        ]
+      },
+
+      "Nellcor-N-395": {
+        name: "Nellcor N-395 Pulse Oximeter",
+        img: "Devices/Nellcor_N_395/Nellcor-N-395_photo.jpg",
+        desc: "Pulse oximeter for continuous SpO₂ and pulse rate monitoring.",
+        manualUrl: "Devices/Nellcor_N_395/Nellcor_N_395_manual.pdf",
+        contact: { biomed: "+1 (555) 010-2200", clinical: "+1 (555) 010-4200" },
+        quickstart: [
+          "Connect the Nellcor sensor cable to the sensor port.",
+          "Apply sensor to patient per manual (finger or alternate site).",
+          "Power on and wait for SpO₂ and pulse rate to stabilize."
+        ],
+        alarms: [
+          "Sensor Off → Reposition or replace sensor.",
+          "Low SpO₂ → Verify sensor placement and perfusion.",
+          "No Pulse Detected → Check site and signal quality."
+        ],
+        troubleshooting: [
+          "No signal → Verify correct sensor type and cable integrity.",
+          "Erratic readings → Reduce motion and ambient light.",
+          "Screen blank → Check power and battery."
         ]
       }
     };
@@ -315,7 +362,7 @@
 
     function updateUIWithResult(best, ranked){
       bestCandidate = best;
-      const pct = Math.max(0, Math.min(1, (best.score + 1) / 2)); // map [-1,1] to [0,1] for bar
+      const pct = Math.max(0, Math.min(1, (best.score + 1) / 2)); // map [-1,1] to [0,1]
       confBar.style.width = (pct*100).toFixed(0) + '%';
       confText.textContent = `Best: ${DEVICES[best.device_id]?.name || best.device_id} — score ${best.score.toFixed(3)}`;
 
