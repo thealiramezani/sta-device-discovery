@@ -1,0 +1,3 @@
+server/.env
+server/rag_index/
+node_modules/
