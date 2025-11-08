@@ -35,7 +35,7 @@ app.use(cors({
   credentials: false,
   maxAge: 86400
 }))
-app.options('*', cors())
+
 
 // JSON body parser
 app.use(express.json({ limit: '2mb' }))
