@@ -312,3 +312,18 @@ app.get('/ingest-status', (_req, res) => {
   const { running, startedAt, finishedAt, progress, report, error } = ingestJob;
   res.json({ ok: true, running, startedAt, finishedAt, progress, report, error });
 });
+
+
+app.get('/debug-files', (_req, res) => {
+  try {
+    const mapping = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+    const details = {};
+    for (const [deviceId, rel] of Object.entries(mapping)) {
+      const p = path.resolve(ROOT, rel);
+      details[deviceId] = { path: p, exists: fs.existsSync(p) };
+    }
+    res.json({ ok: true, details });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
