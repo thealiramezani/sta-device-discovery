@@ -251,3 +251,64 @@ app.get('/warmup', async (_req, res) => {
     return res.status(500).json({ ok: false, error: String(e) });
   }
 });
+
+
+// Start ingest in the background and return immediately
+app.post('/ingest-start', async (_req, res) => {
+  if (ingestJob.running) {
+    return res.json({ ok: true, running: true, message: 'Ingest already running' });
+  }
+  ingestJob = { running: true, startedAt: new Date(), finishedAt: null, progress: [], report: null, error: null };
+
+  // Run the actual work in the background (no await)
+  (async () => {
+    try {
+      const mapping = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+      const report = {};
+
+      ingestJob.progress.push('Warming up embedder…');
+      await ensureLocalEmbedder();
+      ingestJob.progress.push('Embedder ready.');
+
+      for (const [deviceId, rel] of Object.entries(mapping)) {
+        ingestJob.progress.push(`Processing ${deviceId}…`);
+        const pdfPath = path.resolve(ROOT, rel);
+        if (!fs.existsSync(pdfPath)) { 
+          report[deviceId] = 'missing';
+          ingestJob.progress.push(`  → missing: ${pdfPath}`);
+          continue;
+        }
+        if (loadIndex(deviceId)) { 
+          report[deviceId] = 'ok (cached)';
+          ingestJob.progress.push(`  → cached`);
+          continue;
+        }
+        const raw = await pdfToText(pdfPath);
+        const chunks = chunkText(raw);
+        ingestJob.progress.push(`  → ${chunks.length} chunks, embedding…`);
+        const embs = await embedTexts(chunks);
+        const rows = chunks.map((text, i) => ({ id: `${deviceId}-${i}`, deviceId, text, embedding: embs[i] }));
+        saveIndex(deviceId, rows);
+        report[deviceId] = `ok (${rows.length} chunks)`;
+        ingestJob.progress.push(`  → done`);
+      }
+
+      ingestJob.report = { ok: true, report };
+      ingestJob.running = false;
+      ingestJob.finishedAt = new Date();
+    } catch (e) {
+      console.error(e);
+      ingestJob.error = String(e);
+      ingestJob.running = false;
+      ingestJob.finishedAt = new Date();
+    }
+  })();
+
+  return res.json({ ok: true, started: true });
+});
+
+// Poll ingest status
+app.get('/ingest-status', (_req, res) => {
+  const { running, startedAt, finishedAt, progress, report, error } = ingestJob;
+  res.json({ ok: true, running, startedAt, finishedAt, progress, report, error });
+});
