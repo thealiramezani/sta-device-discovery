@@ -7,38 +7,39 @@ import { fileURLToPath, pathToFileURL } from 'url'
 import OpenAI from 'openai'
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
 
-import cors from 'cors';
+// --------------------------
+// App + CORS (define app FIRST, import cors ONCE)
+// --------------------------
+const app = express()
 
+// Origins that may call your API from the browser
 const ALLOWED_ORIGINS = [
-  'https://thealiramezani.github.io',           // your GitHub Pages origin (no trailing slash)
-  'https://thealiramezani.github.io/sta-device-discovery', // optional, harmless
+  'https://thealiramezani.github.io',
+  'https://thealiramezani.github.io/sta-device-discovery',
   'http://localhost:3000',
   'http://localhost:5173',
   'http://localhost:8080'
-];
+]
 
-// reflect the Origin header if it matches our list
+// good cache hygiene for proxies/CDNs
+app.use((req, res, next) => { res.setHeader('Vary', 'Origin'); next(); })
+
 app.use(cors({
   origin: (origin, cb) => {
-    // allow same-origin/no-origin (curl/Postman) and allowed list
-    if (!origin || ALLOWED_ORIGINS.some(o => origin.startsWith(o))) return cb(null, true);
-    return cb(null, false);
+    // allow server-to-server / curl (no origin) and known frontends
+    if (!origin || ALLOWED_ORIGINS.some(o => origin.startsWith(o))) return cb(null, true)
+    return cb(new Error('Not allowed by CORS'), false)
   },
-  methods: ['GET', 'POST', 'OPTIONS'],
+  methods: ['GET','POST','OPTIONS'],
   allowedHeaders: ['Content-Type'],
   credentials: false,
   maxAge: 86400
-}));
+}))
+app.options('*', cors())
 
-// handle preflight explicitly
-app.options('*', cors());
-
-// --------------------------
-// Config
-// --------------------------
-const app = express()
-app.use(cors({ origin: '*'})) // tighten to your frontend origin in production
+// JSON body parser
 app.use(express.json({ limit: '2mb' }))
+
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = process.cwd()
@@ -227,6 +228,9 @@ app.post('/ingest', async (_req, res) => {
     res.status(500).json({ ok: false, error: String(err) })
   }
 })
+
+const DEMO_MODE = process.env.DEMO_MODE === '1';
+
 
 app.post('/chat', async (req, res) => {
   try {
