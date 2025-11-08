@@ -7,6 +7,32 @@ import { fileURLToPath, pathToFileURL } from 'url'
 import OpenAI from 'openai'
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
 
+import cors from 'cors';
+
+const ALLOWED_ORIGINS = [
+  'https://thealiramezani.github.io',           // your GitHub Pages origin (no trailing slash)
+  'https://thealiramezani.github.io/sta-device-discovery', // optional, harmless
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'http://localhost:8080'
+];
+
+// reflect the Origin header if it matches our list
+app.use(cors({
+  origin: (origin, cb) => {
+    // allow same-origin/no-origin (curl/Postman) and allowed list
+    if (!origin || ALLOWED_ORIGINS.some(o => origin.startsWith(o))) return cb(null, true);
+    return cb(null, false);
+  },
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type'],
+  credentials: false,
+  maxAge: 86400
+}));
+
+// handle preflight explicitly
+app.options('*', cors());
+
 // --------------------------
 // Config
 // --------------------------
@@ -165,6 +191,11 @@ async function ensureIndex(deviceId) {
   const n = await buildIndexForDevice(deviceId);
   return loadIndex(deviceId);
 }
+
+app.use((req, res, next) => {
+  res.setHeader('Vary', 'Origin'); // good cache hygiene
+  next();
+});
 
 
 // --------------------------
