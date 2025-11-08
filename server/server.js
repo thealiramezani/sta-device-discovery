@@ -144,6 +144,29 @@ async function embedTexts(texts) {
   return embedTextsOpenAI(texts)
 }
 
+async function buildIndexForDevice(deviceId) {
+  const mapping = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+  const rel = mapping[deviceId];
+  if (!rel) throw new Error(`Device ${deviceId} not in devices.config.json`);
+  const pdfPath = path.resolve(ROOT, rel);
+  if (!fs.existsSync(pdfPath)) throw new Error(`PDF not found at ${pdfPath}`);
+
+  const raw = await pdfToText(pdfPath);
+  const chunks = chunkText(raw);
+  const embs = await embedTexts(chunks);
+  const rows = chunks.map((text, i) => ({ id: `${deviceId}-${i}`, deviceId, text, embedding: embs[i] }));
+  saveIndex(deviceId, rows);
+  return rows.length;
+}
+
+async function ensureIndex(deviceId) {
+  const existing = loadIndex(deviceId);
+  if (existing) return existing;
+  const n = await buildIndexForDevice(deviceId);
+  return loadIndex(deviceId);
+}
+
+
 // --------------------------
 // Routes
 // --------------------------
@@ -176,10 +199,14 @@ app.post('/ingest', async (_req, res) => {
 
 app.post('/chat', async (req, res) => {
   try {
-    const { device_id, message, history = [] } = req.body || {}
-    if (!device_id || !message) return res.status(400).json({ error: 'device_id and message required' })
-    const idx = loadIndex(device_id)
-    if (!idx) return res.status(400).json({ error: `No index for device ${device_id}. Run /ingest first.` })
+    const { device_id, message, history = [] } = req.body || {};
+    if (!device_id || !message) return res.status(400).json({ error: 'device_id and message required' });
+
+    // NEW: build index on demand
+    const idx = await ensureIndex(device_id);
+    if (!idx || !idx.length) {
+      return res.status(500).json({ error: `Failed to build index for ${device_id}` });
+    }
 
     // embed the query using the same provider so distances are consistent
     const [q] = await embedTexts([message])
