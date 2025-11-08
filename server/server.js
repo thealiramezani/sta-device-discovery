@@ -8,11 +8,10 @@ import OpenAI from 'openai'
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
 
 // --------------------------
-// App + CORS (define app FIRST, import cors ONCE)
+// App + CORS
 // --------------------------
 const app = express()
 
-// Origins that may call your API from the browser
 const ALLOWED_ORIGINS = [
   'https://thealiramezani.github.io',
   'https://thealiramezani.github.io/sta-device-discovery',
@@ -22,11 +21,10 @@ const ALLOWED_ORIGINS = [
 ]
 
 // good cache hygiene for proxies/CDNs
-app.use((req, res, next) => { res.setHeader('Vary', 'Origin'); next(); })
+app.use((_, res, next) => { res.setHeader('Vary', 'Origin'); next(); })
 
 app.use(cors({
   origin: (origin, cb) => {
-    // allow server-to-server / curl (no origin) and known frontends
     if (!origin || ALLOWED_ORIGINS.some(o => origin.startsWith(o))) return cb(null, true)
     return cb(new Error('Not allowed by CORS'), false)
   },
@@ -36,42 +34,37 @@ app.use(cors({
   maxAge: 86400
 }))
 
-
-// JSON body parser
 app.use(express.json({ limit: '2mb' }))
 
-
+// --------------------------
+// Paths / config
+// --------------------------
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = process.cwd()
 const INDEX_DIR = path.join(ROOT, 'rag_index')
 const CONFIG_PATH = path.join(ROOT, 'devices.config.json')
 if (!fs.existsSync(INDEX_DIR)) fs.mkdirSync(INDEX_DIR, { recursive: true })
 
-// PDF.js font URL (silences warnings)
+// PDF.js fonts (silence warnings)
 const fontsPath = path.join(__dirname, 'node_modules', 'pdfjs-dist', 'standard_fonts')
 const standardFontDataUrl = pathToFileURL(fontsPath + path.sep).href
 
-// Model + provider
+// Models
 const CHAT_MODEL = process.env.MODEL || 'gpt-4o-mini'
-const EMBED_PROVIDER = process.env.EMBED_PROVIDER || 'xenova' // 'xenova' (local) or 'openai'
+const EMBED_PROVIDER = process.env.EMBED_PROVIDER || 'xenova' // 'xenova' or 'openai'
 const OPENAI_EMBED_MODEL = process.env.EMBEDDING_MODEL || 'text-embedding-3-small'
 
-// OpenAI client (used for chat; and for embeddings only if EMBED_PROVIDER='openai')
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-  // baseURL: 'https://api.openai.com/v1'
-})
+// OpenAI client
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
 // --------------------------
-// Utilities
+// Helpers
 // --------------------------
 function chunkText(txt, size = 1200, overlap = 200) {
   const chunks = []
   if (!txt || !txt.length) return chunks
-
   const safeOverlap = Math.max(0, Math.min(overlap, size - 1))
   let i = 0
-
   while (i < txt.length) {
     const end = Math.min(i + size, txt.length)
     chunks.push(txt.slice(i, end))
@@ -116,7 +109,6 @@ async function pdfToText(absPath) {
 // --------------------------
 // Embeddings (local or OpenAI)
 // --------------------------
-// Local (free) via @xenova/transformers
 let localEmbedder = null
 async function ensureLocalEmbedder() {
   if (localEmbedder) return localEmbedder
@@ -128,13 +120,12 @@ async function embedTextsLocal(texts) {
   const pipe = await ensureLocalEmbedder()
   const out = []
   for (const t of texts) {
-    const emb = await pipe(t, { pooling: 'mean', normalize: true }) // Float32Array
+    const emb = await pipe(t, { pooling: 'mean', normalize: true })
     out.push(Array.from(emb.data))
   }
   return out
 }
 
-// OpenAI (with batching/backoff if you later switch to EMBED_PROVIDER=openai)
 const EMBED_BATCH = Number(process.env.EMBED_BATCH || 32)
 const EMBED_SLEEP_MS = Number(process.env.EMBED_SLEEP_MS || 300)
 const sleep = ms => new Promise(r => setTimeout(r, ms))
@@ -145,10 +136,7 @@ async function embedTextsOpenAI(texts) {
     let attempt = 0
     while (true) {
       try {
-        const res = await openai.embeddings.create({
-          model: OPENAI_EMBED_MODEL,
-          input: batch
-        })
+        const res = await openai.embeddings.create({ model: OPENAI_EMBED_MODEL, input: batch })
         for (const d of res.data) out.push(d.embedding)
         break
       } catch (err) {
@@ -165,39 +153,53 @@ async function embedTextsOpenAI(texts) {
   }
   return out
 }
-
 async function embedTexts(texts) {
   if (EMBED_PROVIDER === 'xenova') return embedTextsLocal(texts)
   return embedTextsOpenAI(texts)
 }
 
 async function buildIndexForDevice(deviceId) {
-  const mapping = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-  const rel = mapping[deviceId];
-  if (!rel) throw new Error(`Device ${deviceId} not in devices.config.json`);
-  const pdfPath = path.resolve(ROOT, rel);
-  if (!fs.existsSync(pdfPath)) throw new Error(`PDF not found at ${pdfPath}`);
+  const mapping = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'))
+  const rel = mapping[deviceId]
+  if (!rel) throw new Error(`Device ${deviceId} not in devices.config.json`)
+  const pdfPath = path.resolve(ROOT, rel)
+  if (!fs.existsSync(pdfPath)) throw new Error(`PDF not found at ${pdfPath}`)
 
-  const raw = await pdfToText(pdfPath);
-  const chunks = chunkText(raw);
-  const embs = await embedTexts(chunks);
-  const rows = chunks.map((text, i) => ({ id: `${deviceId}-${i}`, deviceId, text, embedding: embs[i] }));
-  saveIndex(deviceId, rows);
-  return rows.length;
+  const raw = await pdfToText(pdfPath)
+  const chunks = chunkText(raw)
+  const embs = await embedTexts(chunks)
+  const rows = chunks.map((text, i) => ({ id: `${deviceId}-${i}`, deviceId, text, embedding: embs[i] }))
+  saveIndex(deviceId, rows)
+  return rows.length
 }
 
 async function ensureIndex(deviceId) {
-  const existing = loadIndex(deviceId);
-  if (existing) return existing;
-  const n = await buildIndexForDevice(deviceId);
-  return loadIndex(deviceId);
+  const existing = loadIndex(deviceId)
+  if (existing) return existing
+  await buildIndexForDevice(deviceId)
+  return loadIndex(deviceId)
 }
 
-app.use((req, res, next) => {
-  res.setHeader('Vary', 'Origin'); // good cache hygiene
-  next();
-});
+// no-store middleware for status/debug endpoints
+const noStore = (_req, res, next) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+  res.set('Pragma', 'no-cache')
+  res.set('Expires', '0')
+  res.set('Surrogate-Control', 'no-store')
+  res.set('CDN-Cache-Control', 'no-store')
+  next()
+}
 
+// Abortable timeout wrapper
+async function withTimeout(run, ms) {
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), ms)
+  try {
+    return await run(ctrl.signal)
+  } finally {
+    clearTimeout(t)
+  }
+}
 
 // --------------------------
 // Routes
@@ -210,8 +212,6 @@ app.post('/ingest', async (_req, res) => {
     for (const [deviceId, rel] of Object.entries(mapping)) {
       const pdfPath = path.resolve(ROOT, rel)
       if (!fs.existsSync(pdfPath)) { report[deviceId] = 'missing'; continue }
-
-      // Skip if already indexed (comment this out to force re-index)
       if (loadIndex(deviceId)) { report[deviceId] = 'ok (cached)'; continue }
 
       const raw = await pdfToText(pdfPath)
@@ -229,21 +229,16 @@ app.post('/ingest', async (_req, res) => {
   }
 })
 
-const DEMO_MODE = process.env.DEMO_MODE === '1';
-
-
 app.post('/chat', async (req, res) => {
   try {
-    const { device_id, message, history = [] } = req.body || {};
-    if (!device_id || !message) return res.status(400).json({ error: 'device_id and message required' });
+    const { device_id, message, history = [] } = req.body || {}
+    if (!device_id || !message) return res.status(400).json({ error: 'device_id and message required' })
 
-    // NEW: build index on demand
-    const idx = await ensureIndex(device_id);
-    if (!idx || !idx.length) {
-      return res.status(500).json({ error: `Failed to build index for ${device_id}` });
-    }
+    // Build index on demand (or switch to strict: require pre-ingest)
+    const idx = await ensureIndex(device_id)
+    if (!idx?.length) return res.status(500).json({ error: `Index missing for ${device_id}` })
 
-    // embed the query using the same provider so distances are consistent
+    // Embed the query with the same provider
     const [q] = await embedTexts([message])
     const ranked = idx
       .map(r => ({ score: cosine(q, r.embedding), text: r.text, id: r.id }))
@@ -261,11 +256,15 @@ app.post('/chat', async (req, res) => {
       { role: 'user', content: user }
     ]
 
-    const completion = await openai.chat.completions.create({
-      model: CHAT_MODEL,
-      temperature: 0.2,
-      messages
-    })
+    const completion = await withTimeout(
+      (signal) => openai.chat.completions.create({
+        model: CHAT_MODEL,
+        temperature: 0.2,
+        messages,
+        signal
+      }),
+      30000
+    )
 
     res.json({
       answer: completion.choices[0].message.content,
@@ -277,115 +276,86 @@ app.post('/chat', async (req, res) => {
   }
 })
 
-app.get('/health', (_req, res) => res.json({ ok: true }))
-
-const port = Number(process.env.PORT || 8787)
-app.listen(port, () => console.log(`RAG server on :${port}`))
-
+const startedAt = Date.now()
+app.get('/health', (_req, res) => {
+  const hasIndexes = fs.existsSync(INDEX_DIR) && fs.readdirSync(INDEX_DIR).length > 0
+  res.json({ ok: true, uptimeSec: Math.round((Date.now() - startedAt)/1000), hasIndexes })
+})
 
 app.get('/', (_req, res) => {
   res.type('text/plain').send(
     'STA Device API is running.\n\n' +
     '• GET  /health\n' +
     '• POST /ingest  (run once after deploy)\n' +
-    '• POST /chat    { device_id, message }\n'
-  );
-});
+    '• POST /chat    { device_id, message }\n' +
+    '• GET  /ingest-status\n' +
+    '• GET  /debug-files\n'
+  )
+})
 
+// ---- Ingest job (background) ----
+let ingestJob = { running:false, startedAt:null, finishedAt:null, progress:[], report:null, error:null }
 
-// Ingest job state (simple in-memory tracker)
-let ingestJob = {
-  running: false,
-  startedAt: null,
-  finishedAt: null,
-  progress: [],   // array of strings you can show in logs/UI
-  report: null,   // final { ok, report }
-  error: null
-};
-
-// Warm up the local embedder (downloads the model once)
 app.get('/warmup', async (_req, res) => {
-  try {
-    await ensureLocalEmbedder();
-    return res.json({ ok: true, message: 'Embedder ready' });
-  } catch (e) {
-    console.error(e);
-    return res.status(500).json({ ok: false, error: String(e) });
-  }
-});
+  try { await ensureLocalEmbedder(); res.json({ ok:true, message:'Embedder ready' }) }
+  catch (e) { console.error(e); res.status(500).json({ ok:false, error:String(e) }) }
+})
 
-
-// Start ingest in the background and return immediately
 app.post('/ingest-start', async (_req, res) => {
-  if (ingestJob.running) {
-    return res.json({ ok: true, running: true, message: 'Ingest already running' });
-  }
-  ingestJob = { running: true, startedAt: new Date(), finishedAt: null, progress: [], report: null, error: null };
-
-  // Run the actual work in the background (no await)
-  (async () => {
+  if (ingestJob.running) return res.json({ ok:true, running:true, message:'Ingest already running' })
+  ingestJob = { running:true, startedAt:new Date(), finishedAt:null, progress:[], report:null, error:null }
+  ;(async () => {
     try {
-      const mapping = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-      const report = {};
-
-      ingestJob.progress.push('Warming up embedder…');
-      await ensureLocalEmbedder();
-      ingestJob.progress.push('Embedder ready.');
-
+      const mapping = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'))
+      const report = {}
+      ingestJob.progress.push('Warming up embedder…'); await ensureLocalEmbedder()
+      ingestJob.progress.push('Embedder ready.')
       for (const [deviceId, rel] of Object.entries(mapping)) {
-        ingestJob.progress.push(`Processing ${deviceId}…`);
-        const pdfPath = path.resolve(ROOT, rel);
-        if (!fs.existsSync(pdfPath)) { 
-          report[deviceId] = 'missing';
-          ingestJob.progress.push(`  → missing: ${pdfPath}`);
-          continue;
-        }
-        if (loadIndex(deviceId)) { 
-          report[deviceId] = 'ok (cached)';
-          ingestJob.progress.push(`  → cached`);
-          continue;
-        }
-        const raw = await pdfToText(pdfPath);
-        const chunks = chunkText(raw);
-        ingestJob.progress.push(`  → ${chunks.length} chunks, embedding…`);
-        const embs = await embedTexts(chunks);
-        const rows = chunks.map((text, i) => ({ id: `${deviceId}-${i}`, deviceId, text, embedding: embs[i] }));
-        saveIndex(deviceId, rows);
-        report[deviceId] = `ok (${rows.length} chunks)`;
-        ingestJob.progress.push(`  → done`);
+        ingestJob.progress.push(`Processing ${deviceId}…`)
+        const pdfPath = path.resolve(ROOT, rel)
+        if (!fs.existsSync(pdfPath)) { report[deviceId] = 'missing'; ingestJob.progress.push(`  → missing: ${pdfPath}`); continue }
+        if (loadIndex(deviceId)) { report[deviceId] = 'ok (cached)'; ingestJob.progress.push('  → cached'); continue }
+        const raw = await pdfToText(pdfPath)
+        const chunks = chunkText(raw)
+        ingestJob.progress.push(`  → ${chunks.length} chunks, embedding…`)
+        const embs = await embedTexts(chunks)
+        const rows = chunks.map((text, i) => ({ id: `${deviceId}-${i}`, deviceId, text, embedding: embs[i] }))
+        saveIndex(deviceId, rows)
+        report[deviceId] = `ok (${rows.length} chunks)`; ingestJob.progress.push('  → done')
       }
-
-      ingestJob.report = { ok: true, report };
-      ingestJob.running = false;
-      ingestJob.finishedAt = new Date();
+      ingestJob.report = { ok:true, report }
     } catch (e) {
-      console.error(e);
-      ingestJob.error = String(e);
-      ingestJob.running = false;
-      ingestJob.finishedAt = new Date();
+      console.error(e); ingestJob.error = String(e)
+    } finally {
+      ingestJob.running = false; ingestJob.finishedAt = new Date()
     }
-  })();
+  })()
+  res.json({ ok:true, started:true })
+})
 
-  return res.json({ ok: true, started: true });
-});
+app.get('/ingest-status', noStore, (_req, res) => {
+  const { running, startedAt, finishedAt, progress, report, error } = ingestJob
+  res.json({ ok:true, running, startedAt, finishedAt, progress, report, error, ts:Date.now() })
+})
 
-// Poll ingest status
-app.get('/ingest-status', (_req, res) => {
-  const { running, startedAt, finishedAt, progress, report, error } = ingestJob;
-  res.json({ ok: true, running, startedAt, finishedAt, progress, report, error });
-});
-
-
-app.get('/debug-files', (_req, res) => {
+app.get('/debug-files', noStore, (_req, res) => {
   try {
-    const mapping = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-    const details = {};
+    const mapping = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'))
+    const details = {}
     for (const [deviceId, rel] of Object.entries(mapping)) {
-      const p = path.resolve(ROOT, rel);
-      details[deviceId] = { path: p, exists: fs.existsSync(p) };
+      const p = path.resolve(ROOT, rel)
+      details[deviceId] = { path: p, exists: fs.existsSync(p) }
     }
-    res.json({ ok: true, details });
+    res.json({ ok:true, details, ts:Date.now() })
   } catch (e) {
-    res.status(500).json({ ok: false, error: String(e) });
+    res.status(500).json({ ok:false, error:String(e) })
   }
-});
+})
+
+// Process-level safety nets
+process.on('unhandledRejection', (e) => console.error('UNHANDLED_REJECTION', e))
+process.on('uncaughtException', (e) => console.error('UNCAUGHT_EXCEPTION', e))
+
+// Start server
+const port = Number(process.env.PORT || 8787)
+app.listen(port, () => console.log(`RAG server on :${port}`))
