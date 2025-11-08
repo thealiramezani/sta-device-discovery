@@ -229,3 +229,14 @@ app.get('/', (_req, res) => {
     '• POST /chat    { device_id, message }\n'
   );
 });
+
+
+// Ingest job state (simple in-memory tracker)
+let ingestJob = {
+  running: false,
+  startedAt: null,
+  finishedAt: null,
+  progress: [],   // array of strings you can show in logs/UI
+  report: null,   // final { ok, report }
+  error: null
+};
