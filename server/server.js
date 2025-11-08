@@ -219,3 +219,13 @@ app.get('/health', (_req, res) => res.json({ ok: true }))
 
 const port = Number(process.env.PORT || 8787)
 app.listen(port, () => console.log(`RAG server on :${port}`))
+
+
+app.get('/', (_req, res) => {
+  res.type('text/plain').send(
+    'STA Device API is running.\n\n' +
+    '• GET  /health\n' +
+    '• POST /ingest  (run once after deploy)\n' +
+    '• POST /chat    { device_id, message }\n'
+  );
+});
