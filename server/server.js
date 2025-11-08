@@ -240,3 +240,14 @@ let ingestJob = {
   report: null,   // final { ok, report }
   error: null
 };
+
+// Warm up the local embedder (downloads the model once)
+app.get('/warmup', async (_req, res) => {
+  try {
+    await ensureLocalEmbedder();
+    return res.json({ ok: true, message: 'Embedder ready' });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ ok: false, error: String(e) });
+  }
+});
