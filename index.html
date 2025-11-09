@@ -242,6 +242,7 @@
     function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c])); }
 
     function renderDevice(id){
+      currentDeviceId = id;
       const d = DEVICES[id];
       const unknown = !d;
       $('#deviceId').textContent = `Device: ${id || '—'}`;
@@ -485,8 +486,12 @@
     initDetector().catch(err => { console.error(err); detStatus.textContent = 'Model failed to load.'; });
   </script>
 
+
+
+
+
   <!-- ChatKit embed (kept separate as a module for clarity) -->
-<script type="module">
+<<script type="module">
   const WORKER_BASE = "https://sta-broker.sta-lab.workers.dev";
   const WORKFLOW_ID = "wf_6910dda632788190af3783dc52bde1890f36e39fdd345f3d";
 
@@ -502,6 +507,9 @@
   const q   = root.querySelector("#q");
   const go  = root.querySelector("#go");
 
+  // keep short chat history so the model has context across turns
+  const history = [];  // array of {role, content}
+
   function append(role, text) {
     const el = document.createElement("div");
     el.style.margin = "6px 0";
@@ -510,32 +518,16 @@
     log.scrollTop = log.scrollHeight;
   }
 
-  // 🔎 Robust extractor for Responses payloads (workflow or plain)
   function extractText(resp) {
     if (!resp) return "";
     if (typeof resp.output_text === "string" && resp.output_text.trim()) return resp.output_text;
-
-    // New Responses format: resp.output is an array of messages
     if (Array.isArray(resp.output)) {
       const pieces = [];
-      for (const msg of resp.output) {
-        // message.content is an array of blocks; pull any .text
-        const blocks = msg?.content || [];
-        for (const b of blocks) {
-          if (typeof b.text === "string") pieces.push(b.text);
-          if (Array.isArray(b.annotations)) {
-            // ignore annotations; they’re metadata for citations
-          }
-        }
-      }
+      for (const msg of resp.output) for (const b of (msg?.content||[])) if (b.text) pieces.push(b.text);
       if (pieces.length) return pieces.join("\n");
     }
-
-    // Older/plain format
     if (Array.isArray(resp.content) && resp.content[0]?.text) return resp.content[0].text;
-
-    // Fallback to a short JSON preview
-    try { return JSON.stringify(resp, null, 2).slice(0, 1200); } catch { return String(resp); }
+    try { return JSON.stringify(resp).slice(0,1000); } catch { return String(resp); }
   }
 
   async function callResponses(body) {
@@ -544,28 +536,61 @@
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (!res.ok) {
-      const txt = await res.text();
-      throw new Error(`HTTP ${res.status}: ${txt}`);
-    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
     return res.json();
+  }
+
+  function buildContextMessages(userMessage) {
+    // Use the globally set currentDeviceId (set in renderDevice)
+    const id = window.currentDeviceId || currentDeviceId || null;
+    const d  = id ? window.DEVICES?.[id] : null;
+
+    const context = id ? [
+      {
+        role: "system",
+        content:
+`You are the STA Device Assistant. The selected device is:
+- id: ${id}
+- name: ${d?.name || "(unknown name)"}
+- manual: ${d?.manualUrl || "(none)"}
+
+Answer SPECIFICALLY for this device using the uploaded manuals (File Search). 
+If the user asks general questions, assume they mean this device unless they clarify otherwise. 
+Be concise and step-by-step; include safety notes when relevant.`
+      }
+    ] : [
+      {
+        role: "system",
+        content:
+`You are the STA Device Assistant. No device is selected.
+Ask a quick follow-up to identify device/model before giving procedures.`
+      }
+    ];
+
+    // Combine short history + the new user turn
+    const recent = history.slice(-10); // keep it light
+    return [...context, ...recent, { role: "user", content: userMessage }];
   }
 
   async function ask(message) {
     append("You", message);
     q.value = "";
 
+    const input = buildContextMessages(message);
+
     // Prefer your published workflow
     try {
       const data = await callResponses({
         workflow: WORKFLOW_ID,
-        model: "gpt-5-mini", // harmless if workflow overrides
-        input: [{ role: "user", content: message }]
+        model: "gpt-5-mini",
+        input
       });
-      append("Assistant", (extractText(data) || "(no answer)").trim());
+      const answer = (extractText(data) || "(no answer)").trim();
+      append("Assistant", answer);
+      history.push({ role: "user", content: message });
+      history.push({ role: "assistant", content: answer });
       return;
     } catch (err) {
-      // If workflow field is not accepted, fall back to plain model
       if (!/unknown_parameter|Unknown parameter/i.test(String(err.message))) {
         append("Assistant", `⚠️ ${err.message}`);
         console.error(err);
@@ -573,13 +598,16 @@
       }
     }
 
-    // Fallback: plain Responses
+    // Fallback: plain model
     try {
       const data = await callResponses({
         model: "gpt-5-mini",
-        input: [{ role: "user", content: message }]
+        input
       });
-      append("Assistant", (extractText(data) || "(no answer)").trim());
+      const answer = (extractText(data) || "(no answer)").trim();
+      append("Assistant", answer);
+      history.push({ role: "user", content: message });
+      history.push({ role: "assistant", content: answer });
     } catch (err2) {
       append("Assistant", `⚠️ ${err2.message}`);
       console.error(err2);
