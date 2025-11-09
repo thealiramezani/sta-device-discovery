@@ -487,19 +487,43 @@
 
   <!-- ChatKit embed (kept separate as a module for clarity) -->
   <script type="module">
-    import { ChatKit } from "https://cdn.jsdelivr.net/npm/@openai/chatkit/dist/index.min.js";
+  const WORKFLOW_ID = "wf_6910dda632788190af3783dc52bde1890f36e39fdd345f3d";
+  const WORKER_BASE = "https://sta-broker.sta-lab.workers.dev";
 
-    const WORKFLOW_ID = "wf_6910dda632788190af3783dc52bde1890f36e39fdd345f3d";
-    const WORKER_BASE = "https://sta-broker.sta-lab.workers.dev";
+  async function loadChatKit() {
+    let ChatKit;
+    try {
+      ({ ChatKit } = await import("https://cdn.jsdelivr.net/npm/@openai/chatkit/dist/index.min.js"));
+    } catch (e1) {
+      console.warn("jsDelivr failed, trying unpkg…", e1);
+      try {
+        ({ ChatKit } = await import("https://unpkg.com/@openai/chatkit@latest/dist/index.min.js"));
+      } catch (e2) {
+        console.error("ChatKit failed to load from both CDNs.", e1, e2);
+        document.querySelector("#agent-chat").innerHTML =
+          '<div style="color:#8993b1">⚠️ Chat failed to load. See console for details.</div>';
+        return;
+      }
+    }
 
-    const chat = new ChatKit({
-      workflowId: WORKFLOW_ID,
-      transport: (path, init) =>
-        fetch(WORKER_BASE + "/openai" + path, init),
-    });
+    try {
+      const chat = new ChatKit({
+        workflowId: WORKFLOW_ID,
+        transport: (path, init) =>
+          fetch(WORKER_BASE + "/openai" + path, init),
+      });
+      chat.mount("#agent-chat");
+      window.__agentChat = chat; // for debugging
+      console.log("ChatKit mounted.");
+    } catch (err) {
+      console.error("ChatKit init error:", err);
+      document.querySelector("#agent-chat").innerHTML =
+        '<div style="color:#8993b1">⚠️ Chat initialization error. See console.</div>';
+    }
+  }
 
-    chat.mount("#agent-chat");
-    window.__agentChat = chat; // optional debug handle
-  </script>
+  loadChatKit();
+</script>
+
 </body>
 </html>
