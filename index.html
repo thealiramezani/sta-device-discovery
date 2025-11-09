@@ -487,20 +487,72 @@
 
   <!-- ChatKit embed (kept separate as a module for clarity) -->
 <script type="module">
-  import { ChatKit } from "./vendor/chatkit.min.js";
-
-  const WORKFLOW_ID = "wf_6910dda632788190af3783dc52bde1890f36e39fdd345f3d";
   const WORKER_BASE = "https://sta-broker.sta-lab.workers.dev";
+  const WORKFLOW_ID = "wf_6910dda632788190af3783dc52bde1890f36e39fdd345f3d";
 
-  const chat = new ChatKit({
-    workflowId: WORKFLOW_ID,
-    transport: (path, init) =>
-      fetch(WORKER_BASE + "/openai" + path, init),
+  // Build a minimal chat UI inside #agent-chat
+  const root = document.querySelector("#agent-chat");
+  root.innerHTML = `
+    <div id="msg" style="height:520px; overflow:auto; padding:12px; background:#0f1533; border:1px solid #223159; border-radius:12px"></div>
+    <div style="display:flex; gap:8px; margin-top:10px">
+      <input id="q" class="btn" style="flex:1; text-align:left" placeholder="Ask about setup, alarms, troubleshooting…">
+      <button id="go" class="btn">Send</button>
+    </div>
+  `;
+  const log = root.querySelector("#msg");
+  const q   = root.querySelector("#q");
+  const go  = root.querySelector("#go");
+
+  function append(role, text) {
+    const el = document.createElement("div");
+    el.style.margin = "6px 0";
+    el.innerHTML = `<span style="color:#8993b1">${role}:</span> ${text}`;
+    log.appendChild(el);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  async function ask(message) {
+    append("You", message);
+    q.value = "";
+
+    try {
+      // Call OpenAI Responses via your Worker proxy.
+      // We include the workflow ID so your published Agent Builder workflow runs.
+      const res = await fetch(WORKER_BASE + "/openai/v1/responses", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          // Model is ignored when a workflow runs, but keep a light default:
+          model: "gpt-5-mini",
+          workflow_id: WORKFLOW_ID,
+          input: [{ role: "user", content: message }]
+        })
+      });
+
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(`HTTP ${res.status}: ${txt.slice(0,200)}`);
+      }
+
+      const data = await res.json();
+      // New Responses API commonly exposes a convenience field:
+      const answer = data.output_text || data.content?.[0]?.text || JSON.stringify(data);
+      append("Assistant", answer || "(no answer)");
+    } catch (err) {
+      append("Assistant", `⚠️ ${err.message}`);
+      console.error(err);
+    }
+  }
+
+  go.addEventListener("click", () => {
+    const text = q.value.trim();
+    if (text) ask(text);
   });
-
-  chat.mount("#agent-chat");
-  window.__agentChat = chat;
+  q.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") go.click();
+  });
 </script>
+
 
 
 </body>
