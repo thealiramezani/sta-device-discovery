@@ -490,7 +490,6 @@
   const WORKER_BASE = "https://sta-broker.sta-lab.workers.dev";
   const WORKFLOW_ID = "wf_6910dda632788190af3783dc52bde1890f36e39fdd345f3d";
 
-  // Build a minimal chat UI inside #agent-chat
   const root = document.querySelector("#agent-chat");
   root.innerHTML = `
     <div id="msg" style="height:520px; overflow:auto; padding:12px; background:#0f1533; border:1px solid #223159; border-radius:12px"></div>
@@ -511,36 +510,61 @@
     log.scrollTop = log.scrollHeight;
   }
 
+  async function callResponses(body) {
+    const res = await fetch(WORKER_BASE + "/openai/v1/responses", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(`HTTP ${res.status}: ${txt}`);
+    }
+    return res.json();
+  }
+
   async function ask(message) {
     append("You", message);
     q.value = "";
 
+    // 1) Try running your published workflow
+    let body = {
+      workflow: WORKFLOW_ID,                // <-- correct field
+      input: [{ role: "user", content: message }],
+      model: "gpt-5-mini"                   // harmless here; used if workflow doesn’t override
+    };
+
     try {
-      // Call OpenAI Responses via your Worker proxy.
-      // We include the workflow ID so your published Agent Builder workflow runs.
-      const res = await fetch(WORKER_BASE + "/openai/v1/responses", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          // Model is ignored when a workflow runs, but keep a light default:
-          model: "gpt-5-mini",
-          workflow_id: WORKFLOW_ID,
-          input: [{ role: "user", content: message }]
-        })
-      });
-
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(`HTTP ${res.status}: ${txt.slice(0,200)}`);
-      }
-
-      const data = await res.json();
-      // New Responses API commonly exposes a convenience field:
-      const answer = data.output_text || data.content?.[0]?.text || JSON.stringify(data);
-      append("Assistant", answer || "(no answer)");
+      let data = await callResponses(body);
+      const answer =
+        data.output_text ??
+        data.content?.[0]?.text ??
+        JSON.stringify(data);
+      append("Assistant", (answer || "(no answer)").trim());
+      return;
     } catch (err) {
-      append("Assistant", `⚠️ ${err.message}`);
-      console.error(err);
+      // If the provider complains about unknown parameter, fall back to plain model
+      if (!/unknown_parameter|Unknown parameter/i.test(String(err.message))) {
+        append("Assistant", `⚠️ ${err.message}`);
+        console.error(err);
+        return;
+      }
+    }
+
+    // 2) Fallback: plain Responses without workflow (works immediately)
+    try {
+      const data = await callResponses({
+        model: "gpt-5-mini",
+        input: [{ role: "user", content: message }]
+      });
+      const answer =
+        data.output_text ??
+        data.content?.[0]?.text ??
+        JSON.stringify(data);
+      append("Assistant", (answer || "(no answer)").trim());
+    } catch (err2) {
+      append("Assistant", `⚠️ ${err2.message}`);
+      console.error(err2);
     }
   }
 
@@ -552,6 +576,7 @@
     if (e.key === "Enter") go.click();
   });
 </script>
+
 
 
 
