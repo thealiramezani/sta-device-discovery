@@ -510,6 +510,34 @@
     log.scrollTop = log.scrollHeight;
   }
 
+  // 🔎 Robust extractor for Responses payloads (workflow or plain)
+  function extractText(resp) {
+    if (!resp) return "";
+    if (typeof resp.output_text === "string" && resp.output_text.trim()) return resp.output_text;
+
+    // New Responses format: resp.output is an array of messages
+    if (Array.isArray(resp.output)) {
+      const pieces = [];
+      for (const msg of resp.output) {
+        // message.content is an array of blocks; pull any .text
+        const blocks = msg?.content || [];
+        for (const b of blocks) {
+          if (typeof b.text === "string") pieces.push(b.text);
+          if (Array.isArray(b.annotations)) {
+            // ignore annotations; they’re metadata for citations
+          }
+        }
+      }
+      if (pieces.length) return pieces.join("\n");
+    }
+
+    // Older/plain format
+    if (Array.isArray(resp.content) && resp.content[0]?.text) return resp.content[0].text;
+
+    // Fallback to a short JSON preview
+    try { return JSON.stringify(resp, null, 2).slice(0, 1200); } catch { return String(resp); }
+  }
+
   async function callResponses(body) {
     const res = await fetch(WORKER_BASE + "/openai/v1/responses", {
       method: "POST",
@@ -527,23 +555,17 @@
     append("You", message);
     q.value = "";
 
-    // 1) Try running your published workflow
-    let body = {
-      workflow: WORKFLOW_ID,                // <-- correct field
-      input: [{ role: "user", content: message }],
-      model: "gpt-5-mini"                   // harmless here; used if workflow doesn’t override
-    };
-
+    // Prefer your published workflow
     try {
-      let data = await callResponses(body);
-      const answer =
-        data.output_text ??
-        data.content?.[0]?.text ??
-        JSON.stringify(data);
-      append("Assistant", (answer || "(no answer)").trim());
+      const data = await callResponses({
+        workflow: WORKFLOW_ID,
+        model: "gpt-5-mini", // harmless if workflow overrides
+        input: [{ role: "user", content: message }]
+      });
+      append("Assistant", (extractText(data) || "(no answer)").trim());
       return;
     } catch (err) {
-      // If the provider complains about unknown parameter, fall back to plain model
+      // If workflow field is not accepted, fall back to plain model
       if (!/unknown_parameter|Unknown parameter/i.test(String(err.message))) {
         append("Assistant", `⚠️ ${err.message}`);
         console.error(err);
@@ -551,17 +573,13 @@
       }
     }
 
-    // 2) Fallback: plain Responses without workflow (works immediately)
+    // Fallback: plain Responses
     try {
       const data = await callResponses({
         model: "gpt-5-mini",
         input: [{ role: "user", content: message }]
       });
-      const answer =
-        data.output_text ??
-        data.content?.[0]?.text ??
-        JSON.stringify(data);
-      append("Assistant", (answer || "(no answer)").trim());
+      append("Assistant", (extractText(data) || "(no answer)").trim());
     } catch (err2) {
       append("Assistant", `⚠️ ${err2.message}`);
       console.error(err2);
@@ -576,6 +594,7 @@
     if (e.key === "Enter") go.click();
   });
 </script>
+
 
 
 
