@@ -140,7 +140,7 @@
       <ul id="tsList"></ul>
     </section>
 
-    <!-- ChatKit-powered Device Assistant -->
+    <!-- Device Assistant -->
     <section class="card" id="chatbox" style="display:none">
       <h2>Device Assistant</h2>
       <div id="agent-chat" style="height:600px"></div>
@@ -236,10 +236,13 @@
       }
     };
 
-    // --- Helpers ---
+    // --- Helpers & state ---
     const $ = sel => document.querySelector(sel);
     const qs = k => new URLSearchParams(location.search).get(k);
     function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c])); }
+
+    // current selected device (used by chat)
+    let currentDeviceId = null;
 
     function renderDevice(id){
       currentDeviceId = id;
@@ -276,7 +279,7 @@
         a.href = `?d=${encodeURIComponent(id)}`;
         a.textContent = `${DEVICES[id].name} (${id})`;
         el.appendChild(a);
-      })
+      });
     }
 
     // Copy deep link
@@ -486,146 +489,133 @@
     initDetector().catch(err => { console.error(err); detStatus.textContent = 'Model failed to load.'; });
   </script>
 
+  <!-- Minimal Agent chat via your Cloudflare Worker proxy -->
+  <script type="module">
+    const WORKER_BASE = "https://sta-broker.sta-lab.workers.dev";
+    const WORKFLOW_ID = "wf_6910dda632788190af3783dc52bde1890f36e39fdd345f3d";
 
+    const root = document.querySelector("#agent-chat");
+    root.innerHTML = `
+      <div id="msg" style="height:520px; overflow:auto; padding:12px; background:#0f1533; border:1px solid #223159; border-radius:12px"></div>
+      <div style="display:flex; gap:8px; margin-top:10px">
+        <input id="q" class="btn" style="flex:1; text-align:left" placeholder="Ask about setup, alarms, troubleshooting…">
+        <button id="go" class="btn">Send</button>
+      </div>
+    `;
+    const log = root.querySelector("#msg");
+    const q   = root.querySelector("#q");
+    const go  = root.querySelector("#go");
 
+    const history = [];  // lightweight chat history
 
-
-  <!-- ChatKit embed (kept separate as a module for clarity) -->
-<<script type="module">
-  const WORKER_BASE = "https://sta-broker.sta-lab.workers.dev";
-  const WORKFLOW_ID = "wf_6910dda632788190af3783dc52bde1890f36e39fdd345f3d";
-
-  const root = document.querySelector("#agent-chat");
-  root.innerHTML = `
-    <div id="msg" style="height:520px; overflow:auto; padding:12px; background:#0f1533; border:1px solid #223159; border-radius:12px"></div>
-    <div style="display:flex; gap:8px; margin-top:10px">
-      <input id="q" class="btn" style="flex:1; text-align:left" placeholder="Ask about setup, alarms, troubleshooting…">
-      <button id="go" class="btn">Send</button>
-    </div>
-  `;
-  const log = root.querySelector("#msg");
-  const q   = root.querySelector("#q");
-  const go  = root.querySelector("#go");
-
-  // keep short chat history so the model has context across turns
-  const history = [];  // array of {role, content}
-
-  function append(role, text) {
-    const el = document.createElement("div");
-    el.style.margin = "6px 0";
-    el.innerHTML = `<span style="color:#8993b1">${role}:</span> ${text}`;
-    log.appendChild(el);
-    log.scrollTop = log.scrollHeight;
-  }
-
-  function extractText(resp) {
-    if (!resp) return "";
-    if (typeof resp.output_text === "string" && resp.output_text.trim()) return resp.output_text;
-    if (Array.isArray(resp.output)) {
-      const pieces = [];
-      for (const msg of resp.output) for (const b of (msg?.content||[])) if (b.text) pieces.push(b.text);
-      if (pieces.length) return pieces.join("\n");
+    function append(role, text) {
+      const el = document.createElement("div");
+      el.style.margin = "6px 0";
+      el.innerHTML = `<span style="color:#8993b1">${role}:</span> ${text}`;
+      log.appendChild(el);
+      log.scrollTop = log.scrollHeight;
     }
-    if (Array.isArray(resp.content) && resp.content[0]?.text) return resp.content[0].text;
-    try { return JSON.stringify(resp).slice(0,1000); } catch { return String(resp); }
-  }
 
-  async function callResponses(body) {
-    const res = await fetch(WORKER_BASE + "/openai/v1/responses", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
-    return res.json();
-  }
+    function extractText(resp) {
+      if (!resp) return "";
+      if (typeof resp.output_text === "string" && resp.output_text.trim()) return resp.output_text;
+      if (Array.isArray(resp.output)) {
+        const pieces = [];
+        for (const msg of resp.output) for (const b of (msg?.content||[])) if (b.text) pieces.push(b.text);
+        if (pieces.length) return pieces.join("\n");
+      }
+      if (Array.isArray(resp.content) && resp.content[0]?.text) return resp.content[0].text;
+      try { return JSON.stringify(resp).slice(0,1000); } catch { return String(resp); }
+    }
 
-  function buildContextMessages(userMessage) {
-    // Use the globally set currentDeviceId (set in renderDevice)
-    const id = window.currentDeviceId || currentDeviceId || null;
-    const d  = id ? window.DEVICES?.[id] : null;
+    async function callResponses(body) {
+      const res = await fetch(WORKER_BASE + "/openai/v1/responses", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+      return res.json();
+    }
 
-    const context = id ? [
-      {
+    function buildContextMessages(userMessage) {
+      const id = window.currentDeviceId || null;
+      const d  = id ? window.DEVICES?.[id] : null;
+
+      const context = id ? [{
         role: "system",
         content:
 `You are the STA Device Assistant. The selected device is:
 - id: ${id}
-- name: ${d?.name || "(unknown name)"}
+- name: ${d?.name || "(unknown)"}
 - manual: ${d?.manualUrl || "(none)"}
 
-Answer SPECIFICALLY for this device using the uploaded manuals (File Search). 
-If the user asks general questions, assume they mean this device unless they clarify otherwise. 
-Be concise and step-by-step; include safety notes when relevant.`
-      }
-    ] : [
-      {
+Always consult File Search first. Restrict search to this device. 
+Be concise and step-by-step; include safety notes.`
+      }] : [{
         role: "system",
         content:
 `You are the STA Device Assistant. No device is selected.
 Ask a quick follow-up to identify device/model before giving procedures.`
-      }
-    ];
+      }];
 
-    // Combine short history + the new user turn
-    const recent = history.slice(-10); // keep it light
-    return [...context, ...recent, { role: "user", content: userMessage }];
-  }
+      const recent = history.slice(-10);
 
-  async function ask(message) {
-    append("You", message);
-    q.value = "";
+      // IMPORTANT: include device_id so File Search can filter with `device_id:{{input.device_id}}`
+      const userTurn = { role: "user", content: userMessage, device_id: id };
 
-    const input = buildContextMessages(message);
+      return [...context, ...recent, userTurn];
+    }
 
-    // Prefer your published workflow
-    try {
-      const data = await callResponses({
-        workflow: WORKFLOW_ID,
-        model: "gpt-5-mini",
-        input
-      });
-      const answer = (extractText(data) || "(no answer)").trim();
-      append("Assistant", answer);
-      history.push({ role: "user", content: message });
-      history.push({ role: "assistant", content: answer });
-      return;
-    } catch (err) {
-      if (!/unknown_parameter|Unknown parameter/i.test(String(err.message))) {
-        append("Assistant", `⚠️ ${err.message}`);
-        console.error(err);
+    async function ask(message) {
+      append("You", message);
+      q.value = "";
+
+      const input = buildContextMessages(message);
+
+      // Try your published workflow first (model is typically ignored here)
+      try {
+        const data = await callResponses({
+          workflow: WORKFLOW_ID,
+          input
+        });
+        const answer = (extractText(data) || "(no answer)").trim();
+        append("Assistant", answer);
+        history.push({ role: "user", content: message });
+        history.push({ role: "assistant", content: answer });
         return;
+      } catch (err) {
+        // If the provider complains about unknown params, fall back to plain model
+        if (!/unknown_parameter|Unknown parameter/i.test(String(err.message))) {
+          append("Assistant", `⚠️ ${err.message}`);
+          console.error(err);
+          return;
+        }
+      }
+
+      // Fallback: direct Responses with gpt-4.1-nano
+      try {
+        const data = await callResponses({
+          model: "gpt-4.1-nano",
+          input
+        });
+        const answer = (extractText(data) || "(no answer)").trim();
+        append("Assistant", answer);
+        history.push({ role: "user", content: message });
+        history.push({ role: "assistant", content: answer });
+      } catch (err2) {
+        append("Assistant", `⚠️ ${err2.message}`);
+        console.error(err2);
       }
     }
 
-    // Fallback: plain model
-    try {
-      const data = await callResponses({
-        model: "gpt-5-mini",
-        input
-      });
-      const answer = (extractText(data) || "(no answer)").trim();
-      append("Assistant", answer);
-      history.push({ role: "user", content: message });
-      history.push({ role: "assistant", content: answer });
-    } catch (err2) {
-      append("Assistant", `⚠️ ${err2.message}`);
-      console.error(err2);
-    }
-  }
-
-  go.addEventListener("click", () => {
-    const text = q.value.trim();
-    if (text) ask(text);
-  });
-  q.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") go.click();
-  });
-</script>
-
-
-
-
-
+    go.addEventListener("click", () => {
+      const text = q.value.trim();
+      if (text) ask(text);
+    });
+    q.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") go.click();
+    });
+  </script>
 </body>
 </html>
