@@ -497,7 +497,11 @@
   <!-- Minimal Agent chat via your Cloudflare Worker proxy -->
   <script type="module">
   const WORKER_BASE = "https://sta-broker.sta-lab.workers.dev";
-  const WORKFLOW_ID = "wf_6910dda632788190af3783dc52bde1890f36e39fdd345f3d";
+
+  // Leave WORKFLOW_ID empty unless you have a published Workflow in the same org as your API key.
+  const WORKFLOW_ID = ""; // e.g., "wf_xxx" if you truly have one
+  const PRIMARY_MODEL  = "gpt-4.1-mini"; // main model (concise, capable)
+  const FALLBACK_MODEL = "gpt-4.1-nano"; // smaller fallback
 
   const root = document.querySelector("#agent-chat");
   root.innerHTML = `
@@ -617,54 +621,69 @@ Ask one quick follow-up to identify device/model. Formatting: ${defaultStyle}`
   }
 
   async function ask(message) {
-  lastUserPrompt = message;
-  append("You", mdToHtml(message));
-  q.value = "";
-  setLoading(true);
+    lastUserPrompt = message;
+    append("You", mdToHtml(message));
+    q.value = "";
+    setLoading(true);
 
-  const long = /expand|more detail|details|why|explain/i.test(message);
-  const input = buildContextMessages(message, { long });
+    const long = /expand|more detail|details|why|explain/i.test(message);
+    const input = buildContextMessages(message, { long });
 
-  // 1) Prefer running the Workflow via /v1/responses with model=<workflow_id>
-  try {
-    const data = await callResponses({
-      model: WORKFLOW_ID,           // <-- key change
-      input,
-      max_output_tokens: long ? 600 : 180
-    });
-    const answer = (extractText(data) || "(no answer)").trim();
-    append("Assistant", mdToHtml(answer), { withMore: !long });
-    history.push({ role: "user", content: message });
-    history.push({ role: "assistant", content: answer });
-    return; // success
-  } catch (err) {
-    // Only show a short error, then fall back to a plain model
-    append("Assistant", mdToHtml(`⚠️ ${err.message}`));
-    console.error(err);
-  } finally {
-    setLoading(false);
+    // 1) Primary: normal model (fast, reliable)
+    try {
+      const data = await callResponses({
+        model: PRIMARY_MODEL,
+        input,
+        max_output_tokens: long ? 600 : 180
+      });
+      const answer = (extractText(data) || "(no answer)").trim();
+      append("Assistant", mdToHtml(answer), { withMore: !long });
+      history.push({ role: "user", content: message });
+      history.push({ role: "assistant", content: answer });
+      setLoading(false);
+      return;
+    } catch (err) {
+      console.error("Primary model failed:", err);
+      // no user-facing error yet; try fallback
+    }
+
+    // 2) Optional: Workflow (only if configured)
+    if (WORKFLOW_ID) {
+      try {
+        const data = await callResponses({
+          model: WORKFLOW_ID,
+          input,
+          max_output_tokens: long ? 600 : 180
+        });
+        const answer = (extractText(data) || "(no answer)").trim();
+        append("Assistant", mdToHtml(answer), { withMore: !long });
+        history.push({ role: "user", content: message });
+        history.push({ role: "assistant", content: answer });
+        setLoading(false);
+        return;
+      } catch (errWf) {
+        console.error("Workflow failed:", errWf);
+      }
+    }
+
+    // 3) Fallback: smaller model
+    try {
+      const data = await callResponses({
+        model: FALLBACK_MODEL,
+        input,
+        max_output_tokens: long ? 600 : 180
+      });
+      const answer = (extractText(data) || "(no answer)").trim();
+      append("Assistant", mdToHtml(answer), { withMore: !long });
+      history.push({ role: "user", content: message });
+      history.push({ role: "assistant", content: answer });
+    } catch (err2) {
+      console.error("Fallback model failed:", err2);
+      append("Assistant", mdToHtml(`⚠️ ${err2.message}`));
+    } finally {
+      setLoading(false);
+    }
   }
-
-  // 2) Fallback: direct model (concise)
-  setLoading(true);
-  try {
-    const data = await callResponses({
-      model: "gpt-4.1-nano",
-      input,
-      max_output_tokens: long ? 600 : 180
-    });
-    const answer = (extractText(data) || "(no answer)").trim();
-    append("Assistant", mdToHtml(answer), { withMore: !long });
-    history.push({ role: "user", content: message });
-    history.push({ role: "assistant", content: answer });
-  } catch (err2) {
-    append("Assistant", mdToHtml(`⚠️ ${err2.message}`));
-    console.error(err2);
-  } finally {
-    setLoading(false);
-  }
-}
-
 
   go.addEventListener("click", () => {
     const text = q.value.trim();
@@ -673,7 +692,7 @@ Ask one quick follow-up to identify device/model. Formatting: ${defaultStyle}`
   q.addEventListener("keydown", (e) => {
     if (e.key === "Enter") go.click();
   });
-</script>
+  </script>
 
 </body>
 </html>
