@@ -635,7 +635,7 @@ Ask one quick follow-up to identify device/model. Formatting: ${defaultStyle}`
 
     try {
       // Prefer your published workflow (it will do File Search)
-      const data = await callResponses({ workflow: WORKFLOW_ID, input });
+      const data = await callResponses({ model: WORKFLOW_ID, input });
       const answer = (extractText(data) || "(no answer)").trim();
       append("Assistant", mdToHtml(answer), { withMore: !long });
       history.push({ role: "user", content: message });
