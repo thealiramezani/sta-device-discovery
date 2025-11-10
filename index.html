@@ -499,9 +499,12 @@
 const WORKER_BASE = "https://sta-broker.sta-lab.workers.dev";
 
 // Your published Workflow ID (must exist in the same org/project as your API key)
-const WORKFLOW_ID   = "wf_6910dda632788190af3783dc52bde1890f36e39fdd345f3d";
-const PRIMARY_MODEL = WORKFLOW_ID;          // run the Workflow first
-const FALLBACK_MODEL = "gpt-4.1-nano";      // fallback if Workflow call fails
+const WORKFLOW_ID    = "wf_6910dda632788190af3783dc52bde1890f36e39fdd345f3d";
+const PRIMARY_MODEL  = WORKFLOW_ID;          // run the Workflow first
+const FALLBACK_MODEL = "gpt-4.1-nano";       // fallback if Workflow call fails
+
+// Force the agent to use File Search while debugging
+const FORCE_TOOL_CHOICE_REQUIRED = true;
 
 const root = document.querySelector("#agent-chat");
 root.innerHTML = `
@@ -519,7 +522,6 @@ const q   = root.querySelector("#q");
 const go  = root.querySelector("#go");
 
 const history = [];
-let lastUserPrompt = "";
 
 function setLoading(on){
   bar.classList.toggle("hidden", !on);
@@ -527,7 +529,6 @@ function setLoading(on){
   go.textContent = on ? "Sending…" : "Send";
 }
 
-// Minimal Markdown -> HTML
 function mdToHtml(text){
   if (!text) return "";
   const esc = (s)=>String(s).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
@@ -628,11 +629,12 @@ async function ask(message) {
   const long = /expand|more detail|details|why|explain/i.test(message);
   const input = buildContextMessages(message, { long });
 
-  // 1) Primary: call your Workflow
+  // 1) Primary: call your Workflow (force tool use while debugging)
   try {
     const data = await callResponses({
       model: PRIMARY_MODEL,
       input,
+      ...(FORCE_TOOL_CHOICE_REQUIRED ? { tool_choice: "required" } : {}),
       max_output_tokens: long ? 600 : 180
     });
     const answer = (extractText(data) || "(no answer)").trim();
@@ -665,15 +667,14 @@ async function ask(message) {
   }
 }
 
-go.addEventListener("click", () => {
-  const text = q.value.trim();
+document.querySelector("#go").addEventListener("click", () => {
+  const text = document.querySelector("#q").value.trim();
   if (text) ask(text);
 });
-q.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") go.click();
+document.querySelector("#q").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") document.querySelector("#go").click();
 });
 </script>
-
 
 </body>
 </html>
