@@ -617,48 +617,54 @@ Ask one quick follow-up to identify device/model. Formatting: ${defaultStyle}`
   }
 
   async function ask(message) {
-    lastUserPrompt = message;
-    append("You", mdToHtml(message));
-    q.value = "";
-    setLoading(true);
+  lastUserPrompt = message;
+  append("You", mdToHtml(message));
+  q.value = "";
+  setLoading(true);
 
-    const long = /expand|more detail|details|why|explain/i.test(message);
-    const input = buildContextMessages(message, { long });
+  const long = /expand|more detail|details|why|explain/i.test(message);
+  const input = buildContextMessages(message, { long });
 
-    try {
-      // ✅ Use your Workflow via Responses API
-      const data = await callResponses({ workflow: WORKFLOW_ID, input });
-      const answer = (extractText(data) || "(no answer)").trim();
-      append("Assistant", mdToHtml(answer), { withMore: !long });
-      history.push({ role: "user", content: message });
-      history.push({ role: "assistant", content: answer });
-      return;
-    } catch (err) {
-      append("Assistant", mdToHtml(`⚠️ ${err.message}`));
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-
-    // Fallback: direct model (concise)
-    setLoading(true);
-    try {
-      const data = await callResponses({
-        model: "gpt-4.1-nano",
-        max_output_tokens: long ? 600 : 180,
-        input
-      });
-      const answer = (extractText(data) || "(no answer)").trim();
-      append("Assistant", mdToHtml(answer), { withMore: !long });
-      history.push({ role: "user", content: message });
-      history.push({ role: "assistant", content: answer });
-    } catch (err2) {
-      append("Assistant", mdToHtml(`⚠️ ${err2.message}`));
-      console.error(err2);
-    } finally {
-      setLoading(false);
-    }
+  // 1) Prefer running the Workflow via /v1/responses with model=<workflow_id>
+  try {
+    const data = await callResponses({
+      model: WORKFLOW_ID,           // <-- key change
+      input,
+      max_output_tokens: long ? 600 : 180
+    });
+    const answer = (extractText(data) || "(no answer)").trim();
+    append("Assistant", mdToHtml(answer), { withMore: !long });
+    history.push({ role: "user", content: message });
+    history.push({ role: "assistant", content: answer });
+    return; // success
+  } catch (err) {
+    // Only show a short error, then fall back to a plain model
+    append("Assistant", mdToHtml(`⚠️ ${err.message}`));
+    console.error(err);
+  } finally {
+    setLoading(false);
   }
+
+  // 2) Fallback: direct model (concise)
+  setLoading(true);
+  try {
+    const data = await callResponses({
+      model: "gpt-4.1-nano",
+      input,
+      max_output_tokens: long ? 600 : 180
+    });
+    const answer = (extractText(data) || "(no answer)").trim();
+    append("Assistant", mdToHtml(answer), { withMore: !long });
+    history.push({ role: "user", content: message });
+    history.push({ role: "assistant", content: answer });
+  } catch (err2) {
+    append("Assistant", mdToHtml(`⚠️ ${err2.message}`));
+    console.error(err2);
+  } finally {
+    setLoading(false);
+  }
+}
+
 
   go.addEventListener("click", () => {
     const text = q.value.trim();
