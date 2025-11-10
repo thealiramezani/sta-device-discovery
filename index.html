@@ -496,109 +496,108 @@
 
   <!-- Minimal Agent chat via your Cloudflare Worker proxy -->
   <script type="module">
-  const WORKER_BASE = "https://sta-broker.sta-lab.workers.dev";
+const WORKER_BASE = "https://sta-broker.sta-lab.workers.dev";
 
-  // Leave WORKFLOW_ID empty unless you have a published Workflow in the same org as your API key.
-  const WORKFLOW_ID = "wf_6910dda632788190af3783dc52bde1890f36e39fdd345f3d"; // e.g., "wf_xxx" if you truly have one
-  const PRIMARY_MODEL  = WORKFLOW_ID;
-  // const PRIMARY_MODEL  = "gpt-4.1-mini"; // main model (concise, capable)
-  // const FALLBACK_MODEL = "gpt-4.1-nano"; // smaller fallback
+// Your published Workflow ID (must exist in the same org/project as your API key)
+const WORKFLOW_ID   = "wf_6910dda632788190af3783dc52bde1890f36e39fdd345f3d";
+const PRIMARY_MODEL = WORKFLOW_ID;          // run the Workflow first
+const FALLBACK_MODEL = "gpt-4.1-nano";      // fallback if Workflow call fails
 
-  const root = document.querySelector("#agent-chat");
-  root.innerHTML = `
-    <div class="loadingbar hidden" id="ld"><span></span></div>
-    <div id="msg" style="height:520px; overflow:auto; padding:12px; background:#0f1533; border:1px solid #223159; border-radius:12px"></div>
-    <div style="display:flex; gap:8px; margin-top:10px">
-      <input id="q" class="btn" style="flex:1; text-align:left" placeholder="Ask about setup, alarms, troubleshooting…">
-      <button id="go" class="btn">Send</button>
-      <span class="small" style="opacity:.8">Default: concise</span>
-    </div>
-  `;
-  const bar = root.querySelector("#ld");
-  const log = root.querySelector("#msg");
-  const q   = root.querySelector("#q");
-  const go  = root.querySelector("#go");
+const root = document.querySelector("#agent-chat");
+root.innerHTML = `
+  <div class="loadingbar hidden" id="ld"><span></span></div>
+  <div id="msg" style="height:520px; overflow:auto; padding:12px; background:#0f1533; border:1px solid #223159; border-radius:12px"></div>
+  <div style="display:flex; gap:8px; margin-top:10px">
+    <input id="q" class="btn" style="flex:1; text-align:left" placeholder="Ask about setup, alarms, troubleshooting…">
+    <button id="go" class="btn">Send</button>
+    <span class="small" style="opacity:.8">Default: concise</span>
+  </div>
+`;
+const bar = root.querySelector("#ld");
+const log = root.querySelector("#msg");
+const q   = root.querySelector("#q");
+const go  = root.querySelector("#go");
 
-  const history = [];
-  let lastUserPrompt = "";
+const history = [];
+let lastUserPrompt = "";
 
-  function setLoading(on){
-    bar.classList.toggle("hidden", !on);
-    q.disabled = go.disabled = on;
-    go.textContent = on ? "Sending…" : "Send";
-  }
+function setLoading(on){
+  bar.classList.toggle("hidden", !on);
+  q.disabled = go.disabled = on;
+  go.textContent = on ? "Sending…" : "Send";
+}
 
-  // Minimal Markdown -> HTML
-  function mdToHtml(text){
-    if (!text) return "";
-    const esc = (s)=>String(s).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-    text = String(text).replace(/\r\n/g,"\n");
-    text = text.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-    const blocks = text.split(/\n{2,}/).map(block=>{
-      if (/^\s*\d+\.\s/m.test(block)) {
-        const items = block.split(/\n/).map(l=>l.match(/^\s*(\d+)\.\s+(.*)$/))
-          .filter(Boolean).map(m=>`<li>${esc(m[2])}</li>`).join("");
-        if (items) return `<ol>${items}</ol>`;
-      }
-      if (/^\s*[-•]\s/m.test(block)) {
-        const items = block.split(/\n/).map(l=>l.match(/^\s*[-•]\s+(.*)$/))
-          .filter(Boolean).map(m=>`<li>${esc(m[1])}</li>`).join("");
-        if (items) return `<ul>${items}</ul>`;
-      }
-      return `<p>${esc(block).replace(/\n/g,"<br>")}</p>`;
-    });
-    return blocks.join("\n");
-  }
-
-  function append(role, html, {withMore=false} = {}){
-    const wrap = document.createElement("div");
-    wrap.style.margin = "10px 0";
-    wrap.innerHTML = `<div class="small" style="color:#8993b1">${role}:</div><div>${html}</div>`;
-    if (withMore){
-      const more = document.createElement("button");
-      more.className = "btn";
-      more.style.marginTop = "8px";
-      more.textContent = "Show more details";
-      more.addEventListener("click", ()=> ask("Expand with detailed steps and explanations."));
-      wrap.appendChild(more);
+// Minimal Markdown -> HTML
+function mdToHtml(text){
+  if (!text) return "";
+  const esc = (s)=>String(s).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  text = String(text).replace(/\r\n/g,"\n");
+  text = text.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  const blocks = text.split(/\n{2,}/).map(block=>{
+    if (/^\s*\d+\.\s/m.test(block)) {
+      const items = block.split(/\n/).map(l=>l.match(/^\s*(\d+)\.\s+(.*)$/))
+        .filter(Boolean).map(m=>`<li>${esc(m[2])}</li>`).join("");
+      if (items) return `<ol>${items}</ol>`;
     }
-    log.appendChild(wrap);
-    log.scrollTop = log.scrollHeight;
-  }
-
-  function extractText(resp) {
-    if (!resp) return "";
-    if (typeof resp.output_text === "string" && resp.output_text.trim()) return resp.output_text;
-    if (Array.isArray(resp.output)) {
-      const pieces = [];
-      for (const msg of resp.output) for (const b of (msg?.content||[])) if (b.text) pieces.push(b.text);
-      if (pieces.length) return pieces.join("\n");
+    if (/^\s*[-•]\s/m.test(block)) {
+      const items = block.split(/\n/).map(l=>l.match(/^\s*[-•]\s+(.*)$/))
+        .filter(Boolean).map(m=>`<li>${esc(m[1])}</li>`).join("");
+      if (items) return `<ul>${items}</ul>`;
     }
-    if (Array.isArray(resp.content) && resp.content[0]?.text) return resp.content[0].text;
-    try { return JSON.stringify(resp).slice(0,1000); } catch { return String(resp); }
+    return `<p>${esc(block).replace(/\n/g,"<br>")}</p>`;
+  });
+  return blocks.join("\n");
+}
+
+function append(role, html, {withMore=false} = {}){
+  const wrap = document.createElement("div");
+  wrap.style.margin = "10px 0";
+  wrap.innerHTML = `<div class="small" style="color:#8993b1">${role}:</div><div>${html}</div>`;
+  if (withMore){
+    const more = document.createElement("button");
+    more.className = "btn";
+    more.style.marginTop = "8px";
+    more.textContent = "Show more details";
+    more.addEventListener("click", ()=> ask("Expand with detailed steps and explanations."));
+    wrap.appendChild(more);
   }
+  log.appendChild(wrap);
+  log.scrollTop = log.scrollHeight;
+}
 
-  async function callResponses(body) {
-    const res = await fetch(WORKER_BASE + "/openai/v1/responses", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
-    return res.json();
+function extractText(resp) {
+  if (!resp) return "";
+  if (typeof resp.output_text === "string" && resp.output_text.trim()) return resp.output_text;
+  if (Array.isArray(resp.output)) {
+    const pieces = [];
+    for (const msg of resp.output) for (const b of (msg?.content||[])) if (b.text) pieces.push(b.text);
+    if (pieces.length) return pieces.join("\n");
   }
+  if (Array.isArray(resp.content) && resp.content[0]?.text) return resp.content[0].text;
+  try { return JSON.stringify(resp).slice(0,1000); } catch { return String(resp); }
+}
 
-  function buildContextMessages(userMessage, {long=false} = {}) {
-    const id = window.currentDeviceId || null;
-    const d  = id ? window.DEVICES?.[id] : null;
+async function callResponses(body) {
+  const res = await fetch(WORKER_BASE + "/openai/v1/responses", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+  return res.json();
+}
 
-    const defaultStyle = long
-      ? `You may write a longer answer with full context and explanations. Use headings, numbered steps, and short bullets.`
-      : `Keep answers brief (<=120 words) by default. Use short headings, numbered steps or bullets. Only essential details.`;
+function buildContextMessages(userMessage, {long=false} = {}) {
+  const id = window.currentDeviceId || null;
+  const d  = id ? window.DEVICES?.[id] : null;
 
-    const context = id ? [{
-      role: "system",
-      content:
+  const defaultStyle = long
+    ? `You may write a longer answer with full context and explanations. Use headings, numbered steps, and short bullets.`
+    : `Keep answers brief (<=120 words) by default. Use short headings, numbered steps or bullets. Only essential details.`;
+
+  const context = id ? [{
+    role: "system",
+    content:
 `You are the STA Device Assistant. The selected device is:
 - id: ${id}
 - name: ${d?.name || "(unknown)"}
@@ -607,93 +606,74 @@
 Retrieval policy: Use File Search FIRST. Restrict search to this device’s docs.
 Formatting: ${defaultStyle}
 Include safety notes only if critical.`
-    }] : [{
-      role: "system",
-      content:
+  }] : [{
+    role: "system",
+    content:
 `You are the STA Device Assistant. No device is selected.
 Ask one quick follow-up to identify device/model. Formatting: ${defaultStyle}`
-    }];
+  }];
 
-    const recent = history.slice(-10);
-    const tag = id ? `device_id:${id} ` : "";
-    const userTurn = { role: "user", content: tag + userMessage };
+  const recent = history.slice(-10);
+  const tag = id ? `device_id:${id} ` : "";
+  const userTurn = { role: "user", content: tag + userMessage };
 
-    return [...context, ...recent, userTurn];
+  return [...context, ...recent, userTurn];
+}
+
+async function ask(message) {
+  append("You", mdToHtml(message));
+  q.value = "";
+  setLoading(true);
+
+  const long = /expand|more detail|details|why|explain/i.test(message);
+  const input = buildContextMessages(message, { long });
+
+  // 1) Primary: call your Workflow
+  try {
+    const data = await callResponses({
+      model: PRIMARY_MODEL,
+      input,
+      max_output_tokens: long ? 600 : 180
+    });
+    const answer = (extractText(data) || "(no answer)").trim();
+    append("Assistant", mdToHtml(answer), { withMore: !long });
+    history.push({ role: "user", content: message });
+    history.push({ role: "assistant", content: answer });
+    setLoading(false);
+    return;
+  } catch (err) {
+    console.error("Workflow failed:", err);
+    // fall through to a standard model
   }
 
-  async function ask(message) {
-    lastUserPrompt = message;
-    append("You", mdToHtml(message));
-    q.value = "";
-    setLoading(true);
-
-    const long = /expand|more detail|details|why|explain/i.test(message);
-    const input = buildContextMessages(message, { long });
-
-    // 1) Primary: normal model (fast, reliable)
-    try {
-      const data = await callResponses({
-        model: PRIMARY_MODEL,
-        input,
-        max_output_tokens: long ? 600 : 180
-      });
-      const answer = (extractText(data) || "(no answer)").trim();
-      append("Assistant", mdToHtml(answer), { withMore: !long });
-      history.push({ role: "user", content: message });
-      history.push({ role: "assistant", content: answer });
-      setLoading(false);
-      return;
-    } catch (err) {
-      console.error("Primary model failed:", err);
-      // no user-facing error yet; try fallback
-    }
-
-    // 2) Optional: Workflow (only if configured)
-    if (WORKFLOW_ID) {
-      try {
-        const data = await callResponses({
-          model: WORKFLOW_ID,
-          input,
-          max_output_tokens: long ? 600 : 180
-        });
-        const answer = (extractText(data) || "(no answer)").trim();
-        append("Assistant", mdToHtml(answer), { withMore: !long });
-        history.push({ role: "user", content: message });
-        history.push({ role: "assistant", content: answer });
-        setLoading(false);
-        return;
-      } catch (errWf) {
-        console.error("Workflow failed:", errWf);
-      }
-    }
-
-    // 3) Fallback: smaller model
-    try {
-      const data = await callResponses({
-        model: FALLBACK_MODEL,
-        input,
-        max_output_tokens: long ? 600 : 180
-      });
-      const answer = (extractText(data) || "(no answer)").trim();
-      append("Assistant", mdToHtml(answer), { withMore: !long });
-      history.push({ role: "user", content: message });
-      history.push({ role: "assistant", content: answer });
-    } catch (err2) {
-      console.error("Fallback model failed:", err2);
-      append("Assistant", mdToHtml(`⚠️ ${err2.message}`));
-    } finally {
-      setLoading(false);
-    }
+  // 2) Fallback: small general model
+  try {
+    const data = await callResponses({
+      model: FALLBACK_MODEL,
+      input,
+      max_output_tokens: long ? 600 : 180
+    });
+    const answer = (extractText(data) || "(no answer)").trim();
+    append("Assistant", mdToHtml(answer), { withMore: !long });
+    history.push({ role: "user", content: message });
+    history.push({ role: "assistant", content: answer });
+  } catch (err2) {
+    console.error("Fallback model failed:", err2);
+    append("Assistant", mdToHtml(`⚠️ ${err2.message}`));
+  } finally {
+    setLoading(false);
   }
+}
 
-  go.addEventListener("click", () => {
-    const text = q.value.trim();
-    if (text) ask(text);
-  });
-  q.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") go.click();
-  });
-  </script>
+go.addEventListener("click", () => {
+  const text = q.value.trim();
+  if (text) ask(text);
+});
+q.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") go.click();
+});
+</script>
+
 
 </body>
 </html>
