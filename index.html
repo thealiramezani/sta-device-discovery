@@ -5,6 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Device Discovery – STA MVP</title>
   <style>
+
+    /* loading bar */
+    .loadingbar { height: 3px; background:#1a2446; border-radius:2px; overflow:hidden; margin-bottom:8px; }
+    .loadingbar > span { display:block; height:100%; width:30%; animation: slide 1.1s infinite linear; background: linear-gradient(90deg, #7aa2ff, #3ddc97); }
+    @keyframes slide { 0% { margin-left:-30% } 100% { margin-left:100% } }
+    .hidden { display:none !important; } /* you already have .hidden, ok if duplicated */
+
+
     :root {
       --bg: #0b1020; --card: #121936; --muted: #8993b1; --text: #e8edff; --accent: #7aa2ff;
       --ok: #3ddc97; --warn: #ffd166; --err: #ff6b6b;
@@ -491,131 +499,187 @@
 
   <!-- Minimal Agent chat via your Cloudflare Worker proxy -->
   <script type="module">
-    const WORKER_BASE = "https://sta-broker.sta-lab.workers.dev";
-    const WORKFLOW_ID = "wf_6910dda632788190af3783dc52bde1890f36e39fdd345f3d";
+  const WORKER_BASE = "https://sta-broker.sta-lab.workers.dev";
+  const WORKFLOW_ID = "wf_6910dda632788190af3783dc52bde1890f36e39fdd345f3d";
 
-    const root = document.querySelector("#agent-chat");
-    root.innerHTML = `
-      <div id="msg" style="height:520px; overflow:auto; padding:12px; background:#0f1533; border:1px solid #223159; border-radius:12px"></div>
-      <div style="display:flex; gap:8px; margin-top:10px">
-        <input id="q" class="btn" style="flex:1; text-align:left" placeholder="Ask about setup, alarms, troubleshooting…">
-        <button id="go" class="btn">Send</button>
-      </div>
-    `;
-    const log = root.querySelector("#msg");
-    const q   = root.querySelector("#q");
-    const go  = root.querySelector("#go");
+  const root = document.querySelector("#agent-chat");
+  root.innerHTML = `
+    <div class="loadingbar hidden" id="ld"><span></span></div>
+    <div id="msg" style="height:520px; overflow:auto; padding:12px; background:#0f1533; border:1px solid #223159; border-radius:12px"></div>
+    <div style="display:flex; gap:8px; margin-top:10px">
+      <input id="q" class="btn" style="flex:1; text-align:left" placeholder="Ask about setup, alarms, troubleshooting…">
+      <button id="go" class="btn">Send</button>
+      <span class="small" style="opacity:.8">Default: concise</span>
+    </div>
+  `;
+  const bar = root.querySelector("#ld");
+  const log = root.querySelector("#msg");
+  const q   = root.querySelector("#q");
+  const go  = root.querySelector("#go");
 
-    const history = [];  // lightweight chat history
+  const history = [];   // lightweight chat history
+  let lastUserPrompt = "";
 
-    function append(role, text) {
-      const el = document.createElement("div");
-      el.style.margin = "6px 0";
-      el.innerHTML = `<span style="color:#8993b1">${role}:</span> ${text}`;
-      log.appendChild(el);
-      log.scrollTop = log.scrollHeight;
-    }
+  function setLoading(on){
+    bar.classList.toggle("hidden", !on);
+    q.disabled = go.disabled = on;
+    go.textContent = on ? "Sending…" : "Send";
+  }
 
-    function extractText(resp) {
-      if (!resp) return "";
-      if (typeof resp.output_text === "string" && resp.output_text.trim()) return resp.output_text;
-      if (Array.isArray(resp.output)) {
-        const pieces = [];
-        for (const msg of resp.output) for (const b of (msg?.content||[])) if (b.text) pieces.push(b.text);
-        if (pieces.length) return pieces.join("\n");
+  // --- Minimal Markdown -> HTML formatting (bullets, numbers, bold) ---
+  function mdToHtml(text){
+    if (!text) return "";
+    // escape basic HTML
+    const esc = (s)=>s.replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+    text = text.replace(/\r\n/g,"\n");
+
+    // Bold **text**
+    text = text.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+
+    // Split paragraphs
+    const blocks = text.split(/\n{2,}/).map(block=>{
+      // Numbered list
+      if (/^\s*\d+\.\s/m.test(block)) {
+        const items = block.split(/\n/).map(l=>l.match(/^\s*(\d+)\.\s+(.*)$/)).filter(Boolean).map(m=>`<li>${esc(m[2])}</li>`).join("");
+        if (items) return `<ol>${items}</ol>`;
       }
-      if (Array.isArray(resp.content) && resp.content[0]?.text) return resp.content[0].text;
-      try { return JSON.stringify(resp).slice(0,1000); } catch { return String(resp); }
+      // Bulleted list
+      if (/^\s*[-•]\s/m.test(block)) {
+        const items = block.split(/\n/).map(l=>l.match(/^\s*[-•]\s+(.*)$/)).filter(Boolean).map(m=>`<li>${esc(m[1])}</li>`).join("");
+        if (items) return `<ul>${items}</ul>`;
+      }
+      return `<p>${esc(block).replace(/\n/g,"<br>")}</p>`;
+    });
+    return blocks.join("\n");
+  }
+
+  function append(role, html, {withMore=false} = {}){
+    const wrap = document.createElement("div");
+    wrap.style.margin = "10px 0";
+    wrap.innerHTML = `<div class="small" style="color:#8993b1">${role}:</div><div>${html}</div>`;
+    if (withMore){
+      const more = document.createElement("button");
+      more.className = "btn";
+      more.style.marginTop = "8px";
+      more.textContent = "Show more details";
+      more.addEventListener("click", ()=> ask("Expand with detailed steps and explanations."));
+      wrap.appendChild(more);
     }
+    log.appendChild(wrap);
+    log.scrollTop = log.scrollHeight;
+  }
 
-    async function callResponses(body) {
-      const res = await fetch(WORKER_BASE + "/openai/v1/responses", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
-      return res.json();
+  function extractText(resp) {
+    if (!resp) return "";
+    if (typeof resp.output_text === "string" && resp.output_text.trim()) return resp.output_text;
+    if (Array.isArray(resp.output)) {
+      const pieces = [];
+      for (const msg of resp.output) for (const b of (msg?.content||[])) if (b.text) pieces.push(b.text);
+      if (pieces.length) return pieces.join("\n");
     }
+    if (Array.isArray(resp.content) && resp.content[0]?.text) return resp.content[0].text;
+    try { return JSON.stringify(resp).slice(0,1000); } catch { return String(resp); }
+  }
 
-    function buildContextMessages(userMessage) {
-      const id = window.currentDeviceId || null;
-      const d  = id ? window.DEVICES?.[id] : null;
+  async function callResponses(body) {
+    const res = await fetch(WORKER_BASE + "/openai/v1/responses", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+    return res.json();
+  }
 
-      const context = id ? [{
-        role: "system",
-        content:
+  function buildContextMessages(userMessage, {long=false} = {}) {
+    const id = window.currentDeviceId || null;
+    const d  = id ? window.DEVICES?.[id] : null;
+
+    const defaultStyle = long
+      ? `You may write a longer answer with full context and explanations. Use headings, numbered steps, and short bullets.`
+      : `Keep answers brief (<=120 words) by default. Use short headings, numbered steps or bullets. Only essential details.`;
+
+    const context = id ? [{
+      role: "system",
+      content:
 `You are the STA Device Assistant. The selected device is:
 - id: ${id}
 - name: ${d?.name || "(unknown)"}
 - manual: ${d?.manualUrl || "(none)"}
 
-Always consult File Search first. Restrict search to this device. 
-Be concise and step-by-step; include safety notes.`
-      }] : [{
-        role: "system",
-        content:
+Retrieval policy: Use File Search FIRST. Restrict search to this device’s docs.
+Formatting: ${defaultStyle}
+Include safety notes only if critical.`
+    }] : [{
+      role: "system",
+      content:
 `You are the STA Device Assistant. No device is selected.
-Ask a quick follow-up to identify device/model before giving procedures.`
-      }];
+Ask one quick follow-up to identify device/model. Formatting: ${defaultStyle}`
+    }];
 
-      const recent = history.slice(-10);
+    const recent = history.slice(-10);
+    // include device_id so File Search query can use device_id:{{input.device_id}}
+    const userTurn = { role: "user", content: userMessage, device_id: id };
 
-      // IMPORTANT: include device_id so File Search can filter with `device_id:{{input.device_id}}`
-      const userTurn = { role: "user", content: userMessage, device_id: id };
+    return [...context, ...recent, userTurn];
+  }
 
-      return [...context, ...recent, userTurn];
-    }
+  async function ask(message) {
+    lastUserPrompt = message;
+    append("You", mdToHtml(message));
+    q.value = "";
+    setLoading(true);
 
-    async function ask(message) {
-      append("You", message);
-      q.value = "";
+    const long = /expand|more detail|details|why|explain/i.test(message);
+    const input = buildContextMessages(message, { long });
 
-      const input = buildContextMessages(message);
-
-      // Try your published workflow first (model is typically ignored here)
-      try {
-        const data = await callResponses({
-          workflow: WORKFLOW_ID,
-          input
-        });
-        const answer = (extractText(data) || "(no answer)").trim();
-        append("Assistant", answer);
-        history.push({ role: "user", content: message });
-        history.push({ role: "assistant", content: answer });
+    try {
+      // Prefer your published workflow (it will do File Search)
+      const data = await callResponses({ workflow: WORKFLOW_ID, input });
+      const answer = (extractText(data) || "(no answer)").trim();
+      append("Assistant", mdToHtml(answer), { withMore: !long });
+      history.push({ role: "user", content: message });
+      history.push({ role: "assistant", content: answer });
+      return;
+    } catch (err) {
+      // If unknown param shape, fall back to plain model
+      if (!/unknown_parameter|Unknown parameter/i.test(String(err.message))) {
+        append("Assistant", mdToHtml(`⚠️ ${err.message}`));
+        console.error(err);
         return;
-      } catch (err) {
-        // If the provider complains about unknown params, fall back to plain model
-        if (!/unknown_parameter|Unknown parameter/i.test(String(err.message))) {
-          append("Assistant", `⚠️ ${err.message}`);
-          console.error(err);
-          return;
-        }
       }
-
-      // Fallback: direct Responses with gpt-4.1-nano
-      try {
-        const data = await callResponses({
-          model: "gpt-4.1-nano",
-          input
-        });
-        const answer = (extractText(data) || "(no answer)").trim();
-        append("Assistant", answer);
-        history.push({ role: "user", content: message });
-        history.push({ role: "assistant", content: answer });
-      } catch (err2) {
-        append("Assistant", `⚠️ ${err2.message}`);
-        console.error(err2);
-      }
+    } finally {
+      setLoading(false);
     }
 
-    go.addEventListener("click", () => {
-      const text = q.value.trim();
-      if (text) ask(text);
-    });
-    q.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") go.click();
-    });
-  </script>
+    // Fallback: direct Responses with 4.1-nano, concise + token cap
+    setLoading(true);
+    try {
+      const data = await callResponses({
+        model: "gpt-4.1-nano",
+        max_output_tokens: long ? 600 : 180,
+        input
+      });
+      const answer = (extractText(data) || "(no answer)").trim();
+      append("Assistant", mdToHtml(answer), { withMore: !long });
+      history.push({ role: "user", content: message });
+      history.push({ role: "assistant", content: answer });
+    } catch (err2) {
+      append("Assistant", mdToHtml(`⚠️ ${err2.message}`));
+      console.error(err2);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  go.addEventListener("click", () => {
+    const text = q.value.trim();
+    if (text) ask(text);
+  });
+  q.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") go.click();
+  });
+</script>
+
 </body>
 </html>
