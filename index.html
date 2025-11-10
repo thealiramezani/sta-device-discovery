@@ -496,12 +496,13 @@
 
   <!-- Minimal Agent chat via your Cloudflare Worker proxy -->
   <script type="module">
-  const WORKER_BASE = "wf_6910dda632788190af3783dc52bde1890f36e39fdd345f3d";
+  const WORKER_BASE = "https://sta-broker.sta-lab.workers.dev";
 
   // Leave WORKFLOW_ID empty unless you have a published Workflow in the same org as your API key.
-  const WORKFLOW_ID = ""; // e.g., "wf_xxx" if you truly have one
-  const PRIMARY_MODEL  = "gpt-4.1-mini"; // main model (concise, capable)
-  const FALLBACK_MODEL = "gpt-4.1-nano"; // smaller fallback
+  const WORKFLOW_ID = "wf_6910dda632788190af3783dc52bde1890f36e39fdd345f3d"; // e.g., "wf_xxx" if you truly have one
+  const PRIMARY_MODEL  = WORKFLOW_ID;
+  // const PRIMARY_MODEL  = "gpt-4.1-mini"; // main model (concise, capable)
+  // const FALLBACK_MODEL = "gpt-4.1-nano"; // smaller fallback
 
   const root = document.querySelector("#agent-chat");
   root.innerHTML = `
