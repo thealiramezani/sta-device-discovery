@@ -619,7 +619,9 @@ Ask one quick follow-up to identify device/model. Formatting: ${defaultStyle}`
 
     const recent = history.slice(-10);
     // include device_id so File Search query can use device_id:{{input.device_id}}
-    const userTurn = { role: "user", content: userMessage, device_id: id };
+    const tag = id ? `device_id:${id} ` : "";
+    const userTurn = { role: "user", content: tag + userMessage };
+
 
     return [...context, ...recent, userTurn];
   }
