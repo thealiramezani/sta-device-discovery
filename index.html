@@ -626,28 +626,44 @@ Ask one quick follow-up to identify device/model. Formatting: ${defaultStyle}`
   return [...context, ...recent, userTurn];
 }
 
+const BASE_URL = "https://sta-broker.sta-lab.workers.dev";
+
 async function ask(message) {
   append("You", mdToHtml(message));
   setLoading(true);
-  const long = /expand|details|why|explain/i.test(message);
-  const input = buildContextMessages(message, { long });
 
   try {
-    const data = await callResponses({
-      model: PRIMARY_MODEL,               // "wf_..."
-      tool_choice: "required",            // force File Search in agent
-      input,
-      max_output_tokens: long ? 600 : 180
+    // Build the proper input for the Responses API
+    const payload = {
+      model: "gpt-4o-mini",
+      input: [{ role: "user", content: message }],
+      store: false
+    };
+
+    // Call the broker
+    const res = await fetch(`${BASE_URL}/openai/v1/responses`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload)
     });
-    append("Assistant", mdToHtml(extractText(data)));
-    return;
+
+    const data = await res.json();
+
+    // Extract the text output safely
+    const text =
+      data.output_text ??
+      (data.output?.[0]?.content?.find?.(c => c.type === "output_text")?.text ??
+       data.output?.[0]?.content?.[0]?.text ??
+       "⚠️ No text in response");
+
+    append("Assistant", mdToHtml(text));
   } catch (err) {
-    append("Assistant", mdToHtml(`⚠️ Primary workflow failed:\n\n${String(err).slice(0,1200)}`));
-    if (!ALLOW_FALLBACK) return;
+    append("Assistant", mdToHtml(`⚠️ Error:\n\n${String(err).slice(0,1200)}`));
   } finally {
     setLoading(false);
   }
 }
+
 
 document.querySelector("#go").addEventListener("click", () => {
   const text = document.querySelector("#q").value.trim();
