@@ -627,34 +627,31 @@ Ask one quick follow-up to identify device/model. Formatting: ${defaultStyle}`
 }
 
 const BASE_URL = "https://sta-broker.sta-lab.workers.dev";
+const AGENT_ID = "awf_6910dda632788190af3783dc52bde1890f36e39fdd345f3d"; // <-- paste from OpenAI
 
 async function ask(message) {
   append("You", mdToHtml(message));
   setLoading(true);
-
   try {
-    // Build the proper input for the Responses API
     const payload = {
-      model: "gpt-4o-mini",
+      agent_id: AGENT_ID,
       input: [{ role: "user", content: message }],
       store: false
+      // optionally: conversation: "user-123-device-ABC"
     };
 
-    // Call the broker
-    const res = await fetch(`${BASE_URL}/openai/v1/responses`, {
+    const res  = await fetch(`${BASE_URL}/openai/v1/responses`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload)
     });
-
     const data = await res.json();
 
-    // Extract the text output safely
     const text =
-      data.output_text ??
-      (data.output?.[0]?.content?.find?.(c => c.type === "output_text")?.text ??
-       data.output?.[0]?.content?.[0]?.text ??
-       "⚠️ No text in response");
+      data.output_text
+      ?? data?.output?.[0]?.content?.find?.(c => c.type === "output_text")?.text
+      ?? data?.output?.[0]?.content?.[0]?.text
+      ?? "⚠️ No text in response";
 
     append("Assistant", mdToHtml(text));
   } catch (err) {
@@ -663,6 +660,7 @@ async function ask(message) {
     setLoading(false);
   }
 }
+
 
 
 document.querySelector("#go").addEventListener("click", () => {
