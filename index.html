@@ -145,11 +145,6 @@
       <ul id="tsList"></ul>
     </section>
 
-    <!-- Device Assistant -->
-    <section class="card" id="chatbox" style="display:none">
-      <h2>Device Assistant</h2>
-      <div id="agent-chat" style="height:600px"></div>
-    </section>
 
     <section class="card" id="chooser" style="display:none">
       <h2>Select a device</h2>
@@ -272,7 +267,7 @@
       ].filter(Boolean).join(' · ');
 
       $('#chooser').style.display = unknown ? 'block' : 'none';
-      $('#chatbox').style.display = unknown ? 'none' : 'block';
+
     }
 
     function buildSelector(){
@@ -494,193 +489,7 @@
     initDetector().catch(err => { console.error(err); detStatus.textContent = 'Model failed to load.'; });
   </script>
 
-  <!-- Minimal Agent chat via your Cloudflare Worker proxy -->
-  <script type="module">
-const WORKER_BASE = "https://sta-broker.sta-lab.workers.dev";
 
-// Your published Workflow ID (must exist in the same org/project as your API key)
-const WORKFLOW_ID    = "wf_6910dda632788190af3783dc52bde1890f36e39fdd345f3d";
-const PRIMARY_MODEL  = WORKFLOW_ID;          // run the Workflow first
-const FALLBACK_MODEL = "gpt-4.1-nano";       // fallback if Workflow call fails
-
-// Force the agent to use File Search while debugging
-const FORCE_TOOL_CHOICE_REQUIRED = true;
-
-const root = document.querySelector("#agent-chat");
-root.innerHTML = `
-  <div class="loadingbar hidden" id="ld"><span></span></div>
-  <div id="msg" style="height:520px; overflow:auto; padding:12px; background:#0f1533; border:1px solid #223159; border-radius:12px"></div>
-  <div style="display:flex; gap:8px; margin-top:10px">
-    <input id="q" class="btn" style="flex:1; text-align:left" placeholder="Ask about setup, alarms, troubleshooting…">
-    <button id="go" class="btn">Send</button>
-    <span class="small" style="opacity:.8">Default: concise</span>
-  </div>
-`;
-const bar = root.querySelector("#ld");
-const log = root.querySelector("#msg");
-const q   = root.querySelector("#q");
-const go  = root.querySelector("#go");
-
-const history = [];
-
-function setLoading(on){
-  bar.classList.toggle("hidden", !on);
-  q.disabled = go.disabled = on;
-  go.textContent = on ? "Sending…" : "Send";
-}
-
-function mdToHtml(text){
-  if (!text) return "";
-  const esc = (s)=>String(s).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-  text = String(text).replace(/\r\n/g,"\n");
-  text = text.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-  const blocks = text.split(/\n{2,}/).map(block=>{
-    if (/^\s*\d+\.\s/m.test(block)) {
-      const items = block.split(/\n/).map(l=>l.match(/^\s*(\d+)\.\s+(.*)$/))
-        .filter(Boolean).map(m=>`<li>${esc(m[2])}</li>`).join("");
-      if (items) return `<ol>${items}</ol>`;
-    }
-    if (/^\s*[-•]\s/m.test(block)) {
-      const items = block.split(/\n/).map(l=>l.match(/^\s*[-•]\s+(.*)$/))
-        .filter(Boolean).map(m=>`<li>${esc(m[1])}</li>`).join("");
-      if (items) return `<ul>${items}</ul>`;
-    }
-    return `<p>${esc(block).replace(/\n/g,"<br>")}</p>`;
-  });
-  return blocks.join("\n");
-}
-
-function append(role, html, {withMore=false} = {}){
-  const wrap = document.createElement("div");
-  wrap.style.margin = "10px 0";
-  wrap.innerHTML = `<div class="small" style="color:#8993b1">${role}:</div><div>${html}</div>`;
-  if (withMore){
-    const more = document.createElement("button");
-    more.className = "btn";
-    more.style.marginTop = "8px";
-    more.textContent = "Show more details";
-    more.addEventListener("click", ()=> ask("Expand with detailed steps and explanations."));
-    wrap.appendChild(more);
-  }
-  log.appendChild(wrap);
-  log.scrollTop = log.scrollHeight;
-}
-
-function extractText(resp) {
-  if (!resp) return "";
-  if (typeof resp.output_text === "string" && resp.output_text.trim()) return resp.output_text;
-  if (Array.isArray(resp.output)) {
-    const pieces = [];
-    for (const msg of resp.output) for (const b of (msg?.content||[])) if (b.text) pieces.push(b.text);
-    if (pieces.length) return pieces.join("\n");
-  }
-  if (Array.isArray(resp.content) && resp.content[0]?.text) return resp.content[0].text;
-  try { return JSON.stringify(resp).slice(0,1000); } catch { return String(resp); }
-}
-
-const ALLOW_FALLBACK = false; // turn off while debugging
-
-async function callResponses(body) {
-  const res = await fetch(WORKER_BASE + "/openai/v1/responses", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const txt = await res.text();
-  if (!res.ok) {
-    throw new Error(`OpenAI error ${res.status}: ${txt}`);
-  }
-  return JSON.parse(txt);
-}
-
-function buildContextMessages(userMessage, {long=false} = {}) {
-  const id = window.currentDeviceId || null;
-  const d  = id ? window.DEVICES?.[id] : null;
-
-  const defaultStyle = long
-    ? `You may write a longer answer with full context and explanations. Use headings, numbered steps, and short bullets.`
-    : `Keep answers brief (<=120 words) by default. Use short headings, numbered steps or bullets. Only essential details.`;
-
-  const context = id ? [{
-    role: "system",
-    content:
-`You are the STA Device Assistant. The selected device is:
-- id: ${id}
-- name: ${d?.name || "(unknown)"}
-- manual: ${d?.manualUrl || "(none)"}
-
-Retrieval policy: Use File Search FIRST. Restrict search to this device’s docs.
-Formatting: ${defaultStyle}
-Include safety notes only if critical.`
-  }] : [{
-    role: "system",
-    content:
-`You are the STA Device Assistant. No device is selected.
-Ask one quick follow-up to identify device/model. Formatting: ${defaultStyle}`
-  }];
-
-  const recent = history.slice(-10);
-  const tag = id ? `device_id:${id} ` : "";
-  const userTurn = { role: "user", content: tag + userMessage };
-
-  return [...context, ...recent, userTurn];
-}
-
-const BASE_URL = "https://sta-broker.sta-lab.workers.dev";
-const VECTOR_STORE_ID = "vs_6910dedb369c81918640e1f1b97ae027";
-
-async function ask(message) {
-  append("You", mdToHtml(message));
-  setLoading(true);
-  try {
-    const id = window.currentDeviceId;
-    const text = id ? `device_id:${id} ${message}` : message;
-
-    const payload = {
-      model: "gpt-4o-mini",
-      tools: [{ type: "file_search" }],
-      tool_choice: "required",
-      input: [{
-        role: "user",
-        content: text,
-        attachments: [{ vector_store_id: VECTOR_STORE_ID, tools: [{ type: "file_search" }] }]
-      }],
-      store: false
-    };
-
-    const res = await fetch(`${BASE_URL}/openai/v1/responses`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    const data = await res.json();
-
-    const out =
-      data.output_text
-      ?? data?.output?.[0]?.content?.find?.(c => c.type === "output_text")?.text
-      ?? data?.output?.[0]?.content?.[0]?.text
-      ?? "⚠️ No text in response";
-
-    append("Assistant", mdToHtml(out));
-  } catch (err) {
-    append("Assistant", mdToHtml(`⚠️ Error:\n\n${String(err).slice(0,1200)}`));
-  } finally {
-    setLoading(false);
-  }
-}
-
-
-
-
-
-document.querySelector("#go").addEventListener("click", () => {
-  const text = document.querySelector("#q").value.trim();
-  if (text) ask(text);
-});
-document.querySelector("#q").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") document.querySelector("#go").click();
-});
-</script>
 
 </body>
 </html>
