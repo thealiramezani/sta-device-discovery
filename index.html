@@ -626,39 +626,49 @@ Ask one quick follow-up to identify device/model. Formatting: ${defaultStyle}`
   return [...context, ...recent, userTurn];
 }
 
-cconst BASE_URL = "https://sta-broker.sta-lab.workers.dev";
-const WORKFLOW_ID = "awf_6910dda632788190af3783dc52bde1890f36e39fdd345f3d"; // yours
+const BASE_URL = "https://sta-broker.sta-lab.workers.dev";
+const VECTOR_STORE_ID = "vs_6910dedb369c81918640e1f1b97ae027";
 
 async function ask(message) {
   append("You", mdToHtml(message));
   setLoading(true);
   try {
+    const id = window.currentDeviceId;
+    const text = id ? `device_id:${id} ${message}` : message;
+
     const payload = {
-      workflow_id: WORKFLOW_ID,
-      input: [{ role: "user", content: message }],
+      model: "gpt-4o-mini",
+      tools: [{ type: "file_search" }],
+      tool_choice: "required",
+      input: [{
+        role: "user",
+        content: text,
+        attachments: [{ vector_store_id: VECTOR_STORE_ID, tools: [{ type: "file_search" }] }]
+      }],
       store: false
     };
 
-    const res  = await fetch(`${BASE_URL}/openai/v1/responses`, {
+    const res = await fetch(`${BASE_URL}/openai/v1/responses`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload)
     });
     const data = await res.json();
 
-    const text =
+    const out =
       data.output_text
       ?? data?.output?.[0]?.content?.find?.(c => c.type === "output_text")?.text
       ?? data?.output?.[0]?.content?.[0]?.text
       ?? "⚠️ No text in response";
 
-    append("Assistant", mdToHtml(text));
+    append("Assistant", mdToHtml(out));
   } catch (err) {
     append("Assistant", mdToHtml(`⚠️ Error:\n\n${String(err).slice(0,1200)}`));
   } finally {
     setLoading(false);
   }
 }
+
 
 
 
