@@ -61,6 +61,14 @@
     .cand img { width:100%; height:120px; object-fit:cover; border-radius:8px; border:1px solid #2a3a61; }
     .det-row { display:flex; gap: 12px; flex-wrap:wrap; align-items:center; }
     .spacer { flex: 1 1 auto; }
+
+    .chatbox { display:flex; flex-direction:column; gap:10px; }
+    .msgs { display:flex; flex-direction:column; gap:8px; max-height: 280px; overflow:auto; padding-right:6px; }
+    .msg { padding:10px 12px; border-radius:12px; background:#151d3a; border:1px solid #2a3a61; }
+    .msg.me { align-self:flex-end; background:#1a2446; }
+    .composer { display:flex; gap:8px; }
+    .composer input { flex:1; padding:10px 12px; border-radius:10px; border:1px solid #2a3a61; background:#0b1020; color:var(--text); }
+
   </style>
 
   <!-- TensorFlow.js + Mobilenet (for lightweight embeddings) -->
@@ -150,6 +158,21 @@
       <h2>Select a device</h2>
       <div class="selector" id="selector"></div>
     </section>
+
+    <section class="card" id="aihelp">
+      <h2>Ask the Manual (AI)</h2>
+      <div id="chatBox" class="chatbox">
+        <div id="chatMessages" class="msgs"></div>
+        <div class="composer">
+          <input id="chatInput" placeholder="Ask about setup, alarms, troubleshooting..." />
+          <button class="btn" id="chatSend">Ask</button>
+        </div>
+        <div class="small" style="margin-top:8px;color:var(--muted);">
+          Answers are educational and grounded in the device manual.
+        </div>
+      </div>
+    </section>
+
 
     <div class="footer">
       Zero-install browser demo for STA 2026. No PHI. Content is educational, not for clinical use.
@@ -487,6 +510,81 @@
     buildSelector();
     renderDevice(qs('d'));
     initDetector().catch(err => { console.error(err); detStatus.textContent = 'Model failed to load.'; });
+
+
+
+    // ===== AI chat wiring (Cloudflare Worker) =====
+    const CHAT_ENDPOINT = "https://device-chat.sta-lab.workers.dev/ask";
+
+    const chatMsgs = document.getElementById("chatMessages");
+    const chatInput = document.getElementById("chatInput");
+    const chatSend = document.getElementById("chatSend");
+    let chatHistory = []; // optional, to keep last Q/A locally
+
+    function appendMsg(text, me=false){
+      const div = document.createElement("div");
+      div.className = "msg" + (me ? " me" : "");
+      div.textContent = text;
+      chatMsgs.appendChild(div);
+      chatMsgs.scrollTop = chatMsgs.scrollHeight;
+    }
+
+    async function askManual(question){
+      if (!window.currentDeviceId) {
+        appendMsg("Choose a device first.");
+        return;
+      }
+
+      appendMsg(question, true);
+      chatInput.value = "";
+      chatSend.disabled = true;
+
+      try {
+        // Include device context so your Worker can scope to the right manual
+        const d = DEVICES[window.currentDeviceId] || {};
+        const body = {
+          q: question,
+          deviceId: window.currentDeviceId,
+          manualUrl: d.manualUrl || null  // useful later if your Worker fetches the PDF
+        };
+
+        const r = await fetch(CHAT_ENDPOINT, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        });
+
+        if (!r.ok) throw new Error("Request failed");
+        const data = await r.json();      // your Worker currently returns { response: "..." }
+        appendMsg(data.response || "No answer.");
+        chatHistory.push({ q: question, a: data.response || "" });
+      } catch (e) {
+        console.error(e);
+        appendMsg("Sorry — the AI helper is unavailable right now.");
+      } finally {
+        chatSend.disabled = false;
+      }
+    }
+
+    chatSend?.addEventListener("click", () => {
+      const q = chatInput.value.trim();
+      if (q) askManual(q);
+    });
+    chatInput?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") chatSend.click();
+    });
+
+    // When device changes, clear chat (optional)
+    const _renderDeviceOrig = renderDevice;
+    renderDevice = function(id){
+      _renderDeviceOrig(id);
+      // reset chat per device
+      if (document.getElementById("chatMessages")) {
+        chatMsgs.innerHTML = "";
+        chatHistory = [];
+      }
+    };
+
   </script>
 
 
