@@ -626,18 +626,17 @@ Ask one quick follow-up to identify device/model. Formatting: ${defaultStyle}`
   return [...context, ...recent, userTurn];
 }
 
-const BASE_URL = "https://sta-broker.sta-lab.workers.dev";
-const AGENT_ID = "awf_6910dda632788190af3783dc52bde1890f36e39fdd345f3d"; // <-- paste from OpenAI
+cconst BASE_URL = "https://sta-broker.sta-lab.workers.dev";
+const WORKFLOW_ID = "awf_6910dda632788190af3783dc52bde1890f36e39fdd345f3d"; // yours
 
 async function ask(message) {
   append("You", mdToHtml(message));
   setLoading(true);
   try {
     const payload = {
-      agent_id: AGENT_ID,
+      workflow_id: WORKFLOW_ID,
       input: [{ role: "user", content: message }],
       store: false
-      // optionally: conversation: "user-123-device-ABC"
     };
 
     const res  = await fetch(`${BASE_URL}/openai/v1/responses`, {
@@ -660,6 +659,7 @@ async function ask(message) {
     setLoading(false);
   }
 }
+
 
 
 
