@@ -56,11 +56,39 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
+.header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .sidebar-header h1 {
   margin: 0;
   font-size: 20px;
   font-weight: 700;
   color: var(--primary);
+}
+
+.home-btn-sidebar {
+  width: 40px;
+  height: 40px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 20px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.home-btn-sidebar:hover {
+  background: var(--surface);
+  border-color: var(--primary);
+  transform: scale(1.05);
 }
 
 .sidebar-header p {
@@ -90,8 +118,56 @@ body {
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
+.toggle-list-btn {
+  width: 100%;
+  padding: 12px 14px;
+  margin-top: 12px;
+  background: var(--primary);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.2s;
+}
+
+.toggle-list-btn:hover {
+  background: var(--primary-dark);
+  transform: translateY(-1px);
+}
+
+.toggle-list-btn span {
+  transition: transform 0.3s;
+}
+
+.toggle-list-btn.open span {
+  transform: rotate(180deg);
+}
+
 .device-list {
   flex: 1;
+  padding: 12px;
+  overflow-y: auto;
+  max-height: 0;
+  opacity: 0;
+  transition: max-height 0.3s ease, opacity 0.3s ease, padding 0.3s ease;
+}
+
+.device-list.collapsed {
+  max-height: 0;
+  opacity: 0;
+  padding: 0 12px;
+  overflow: hidden;
+}
+
+.device-list.expanded {
+  max-height: 1000px;
+  opacity: 1;
   padding: 12px;
 }
 
@@ -150,40 +226,6 @@ body {
   flex: 1;
   overflow-y: auto;
   background: var(--bg);
-}
-
-.top-nav {
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  padding: 16px 32px;
-  position: sticky;
-  top: 0;
-  z-index: 100;
-}
-
-.home-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  color: var(--text);
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.home-btn:hover {
-  background: var(--surface);
-  border-color: var(--primary);
-  transform: translateX(-2px);
-}
-
-.home-btn span {
-  font-size: 18px;
 }
 
 .content-wrapper {
@@ -684,6 +726,11 @@ body {
     height: auto;
     border-right: none;
     border-bottom: 1px solid var(--border);
+    max-height: none;
+  }
+  
+  .device-list.expanded {
+    max-height: 400px;
   }
   
   .app-container {
@@ -692,6 +739,37 @@ body {
   
   .chat-widget {
     left: 0;
+    right: 0;
+    width: 100%;
+  }
+  
+  .chat-container {
+    height: 500px;
+    max-height: 70vh;
+  }
+  
+  .chat-header {
+    padding: 12px 16px;
+  }
+  
+  .chat-messages {
+    padding: 12px 16px;
+  }
+  
+  .chat-input-area {
+    padding: 12px 16px;
+  }
+  
+  .chat-message {
+    max-width: 85%;
+    font-size: 13px;
+  }
+  
+  .chat-close {
+    display: flex;
+    width: 36px;
+    height: 36px;
+    font-size: 28px;
   }
   
   .device-header {
@@ -699,6 +777,10 @@ body {
   }
   
   .content-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .detection-results {
     grid-template-columns: 1fr;
   }
 }
@@ -711,22 +793,25 @@ body {
   <!-- Sidebar -->
   <aside class="sidebar">
     <div class="sidebar-header">
-      <h1>🏥 Medical Devices</h1>
+      <div class="header-top">
+        <h1>🏥 Medical Devices</h1>
+        <button class="home-btn-sidebar hidden" id="homeBtnSidebar" onclick="showDevice(null)">
+          🏠
+        </button>
+      </div>
       <p>Select a device to view details</p>
       <div class="search-box">
         <input type="text" id="searchInput" placeholder="🔍 Search devices..." />
       </div>
+      <button class="toggle-list-btn" id="toggleListBtn">
+        <span id="toggleIcon">▼</span> Device List
+      </button>
     </div>
-    <nav class="device-list" id="deviceList"></nav>
+    <nav class="device-list collapsed" id="deviceList"></nav>
   </aside>
 
   <!-- Main Content -->
   <main class="main-content">
-    <div class="top-nav">
-      <button class="home-btn hidden" id="homeBtn" onclick="showDevice(null)">
-        <span>←</span> Back to Home
-      </button>
-    </div>
     <div class="content-wrapper">
       <!-- Home View -->
       <div class="home-view" id="homeView">
@@ -915,10 +1000,36 @@ function buildSidebar() {
   });
 }
 
+// Toggle device list
+const toggleListBtn = $('#toggleListBtn');
+const toggleIcon = $('#toggleIcon');
+const deviceList = $('#deviceList');
+
+toggleListBtn.addEventListener('click', () => {
+  const isExpanded = deviceList.classList.contains('expanded');
+  
+  if (isExpanded) {
+    deviceList.classList.remove('expanded');
+    deviceList.classList.add('collapsed');
+    toggleListBtn.classList.remove('open');
+  } else {
+    deviceList.classList.remove('collapsed');
+    deviceList.classList.add('expanded');
+    toggleListBtn.classList.add('open');
+  }
+});
+
 // Search functionality
 $('#searchInput').addEventListener('input', (e) => {
   const query = e.target.value.toLowerCase().trim();
   const items = document.querySelectorAll('.device-item');
+  
+  // Auto-expand list when searching
+  if (query !== '' && deviceList.classList.contains('collapsed')) {
+    deviceList.classList.remove('collapsed');
+    deviceList.classList.add('expanded');
+    toggleListBtn.classList.add('open');
+  }
   
   items.forEach(item => {
     const searchText = item.dataset.searchText;
@@ -995,12 +1106,12 @@ function showDevice(id) {
     view.classList.toggle('active', view.id === `view-${id}`);
   });
 
-  // Show/hide home button
-  const homeBtn = $('#homeBtn');
+  // Show/hide home button in sidebar
+  const homeBtnSidebar = $('#homeBtnSidebar');
   if (id) {
-    homeBtn.classList.remove('hidden');
+    homeBtnSidebar.classList.remove('hidden');
   } else {
-    homeBtn.classList.add('hidden');
+    homeBtnSidebar.classList.add('hidden');
   }
 
   // Update chat
