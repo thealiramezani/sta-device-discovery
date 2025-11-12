@@ -939,6 +939,15 @@ body {
   </main>
 </div>
 
+<footer class="app-footer" role="contentinfo" aria-label="Site footer">
+  <div class="footer-content">
+    <div class="footer-left">Developed by <strong>Ali Ramezani</strong></div>
+    <div class="footer-right">Contact: <a href="mailto:ali.ramezani@utah.edu">ali.ramezani@utah.edu</a></div>
+  </div>
+  <div class="footer-disclaimer">© <span id="year"></span> Medistant</div>
+</footer>
+<script>document.getElementById('year').textContent = new Date().getFullYear();</script>
+
 <!-- Chat Widget -->
 <button class="chat-toggle hidden" id="chatToggle">💬</button>
 <div class="chat-widget" id="chatWidget">
