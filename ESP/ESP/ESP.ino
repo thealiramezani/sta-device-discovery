@@ -41,7 +41,7 @@ void startAdvertising() {
 
   advData.setServiceData(eddystoneUUID, frame);
 
-  // 👉 Add the friendly name ONLY to the scan-response packet
+  // Add the friendly name ONLY to the scan-response packet
   scanResp.setName("STA Device Tag");
 
   pAdvertising->setAdvertisementData(advData);
