@@ -2,8 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Device Discovery – Medical Devices</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<meta name="description" content="Medistant - Your AI-powered medical device assistant. Instant support for medical devices in the OR." />
+<meta name="author" content="Ali Ramezani" />
+<title>Medistant - Medical Device Assistant</title>
 <style>
 :root {
   --primary: #2563eb;
@@ -95,6 +97,11 @@ body {
   margin: 4px 0 0;
   font-size: 13px;
   color: var(--text-muted);
+}
+
+.tagline {
+  font-style: italic;
+  font-weight: 500;
 }
 
 .search-box {
@@ -561,6 +568,8 @@ body {
   font-size: 14px;
   font-family: inherit;
   outline: none;
+  /* Prevent zoom on iOS */
+  font-size: 16px;
 }
 
 .chat-input:focus {
@@ -591,6 +600,48 @@ body {
 }
 
 .hidden { display: none !important; }
+
+/* Footer */
+.app-footer {
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding: 16px 32px;
+  margin-top: auto;
+}
+
+.footer-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 14px;
+}
+
+.footer-left {
+  color: var(--text);
+}
+
+.footer-right {
+  color: var(--text-muted);
+}
+
+.footer-right a {
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.footer-right a:hover {
+  text-decoration: underline;
+}
+
+.footer-disclaimer {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+}
 
 /* Detection Card */
 .detection-card {
@@ -737,6 +788,12 @@ body {
     flex-direction: column;
   }
   
+  .footer-content {
+    flex-direction: column;
+    text-align: center;
+    gap: 8px;
+  }
+  
   .chat-widget {
     left: 0;
     right: 0;
@@ -752,6 +809,19 @@ body {
     padding: 12px 16px;
   }
   
+  .chat-header h3 {
+    font-size: 15px;
+  }
+  
+  .chat-close {
+    display: flex;
+    width: 40px;
+    height: 40px;
+    font-size: 32px;
+    flex-shrink: 0;
+    min-width: 40px;
+  }
+  
   .chat-messages {
     padding: 12px 16px;
   }
@@ -762,7 +832,24 @@ body {
   
   .chat-message {
     max-width: 85%;
-    font-size: 13px;
+    font-size: 14px;
+  }
+  
+  .chat-input {
+    font-size: 16px;
+    padding: 10px 14px;
+  }
+  
+  .voice-btn,
+  .voice-toggle {
+    font-size: 18px;
+    padding: 10px 12px;
+    min-width: 44px;
+  }
+  
+  .chat-send {
+    padding: 10px 16px;
+    min-width: 70px;
   }
   
   .chat-close {
@@ -794,12 +881,12 @@ body {
   <aside class="sidebar">
     <div class="sidebar-header">
       <div class="header-top">
-        <h1>🏥 Medical Devices</h1>
+        <h1>💊 Medistant</h1>
         <button class="home-btn-sidebar hidden" id="homeBtnSidebar" onclick="showDevice(null)">
           🏠
         </button>
       </div>
-      <p>Select a device to view details</p>
+      <p class="tagline">Your AI-powered medical device assistant</p>
       <div class="search-box">
         <input type="text" id="searchInput" placeholder="🔍 Search devices..." />
       </div>
@@ -815,8 +902,8 @@ body {
     <div class="content-wrapper">
       <!-- Home View -->
       <div class="home-view" id="homeView">
-        <h2>👋 Welcome to Device Discovery</h2>
-        <p>Select a device from the sidebar or detect it by photo</p>
+        <h2>👋 Welcome to Medistant</h2>
+        <p>Your AI-powered assistant for medical devices. Select a device or detect it by photo.</p>
         
         <!-- Camera Detection -->
         <div class="detection-card">
@@ -1110,6 +1197,11 @@ function showDevice(id) {
   const homeBtnSidebar = $('#homeBtnSidebar');
   if (id) {
     homeBtnSidebar.classList.remove('hidden');
+    
+    // Auto-collapse device list when a device is selected
+    deviceList.classList.remove('expanded');
+    deviceList.classList.add('collapsed');
+    toggleListBtn.classList.remove('open');
   } else {
     homeBtnSidebar.classList.add('hidden');
   }
